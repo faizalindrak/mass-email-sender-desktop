@@ -1,0 +1,6 @@
+PySide6
+qfluentwidgets
+watchdog
+jinja2
+pywin32
+pyinstaller

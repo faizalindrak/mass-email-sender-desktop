@@ -88,9 +88,9 @@ class EmailTemplateEngine:
 
             return str(value)
 
-        return re.sub(r'\\[(\\w+)\\]', replace_var, text)
+        return re.sub(r'\[(\w+)\]', replace_var, text)
 
-    def validate_template(self, template_content: str) -> tuple[bool, str]:
+    def validate_template(self, template_content: str) -> tuple:
         """Validate template syntax"""
         try:
             Template(template_content)

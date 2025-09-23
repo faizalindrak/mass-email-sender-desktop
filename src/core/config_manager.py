@@ -164,7 +164,7 @@ class ConfigManager:
         self.config.set('DEFAULT', 'auto_start_monitoring', str(enabled).lower())
         self.save_config()
 
-    def validate_profile_config(self, config_data: Dict[str, Any]) -> tuple[bool, str]:
+    def validate_profile_config(self, config_data: Dict[str, Any]) -> tuple:
         """Validate profile configuration"""
         required_fields = ['name', 'monitor_folder', 'sent_folder', 'key_pattern', 'email_client']
 

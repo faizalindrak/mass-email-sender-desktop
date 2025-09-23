@@ -6,23 +6,23 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
                               QProgressBar, QStatusBar, QMenuBar, QToolBar, QFileDialog,
                               QMessageBox, QCheckBox, QSpinBox)
-from PySide6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PySide6.QtCore import Qt, QTimer, QThread, Signal  # Changed pyqtSignal to Signal
 from PySide6.QtGui import QAction, QIcon, QFont
 from qfluentwidgets import (FluentIcon, setTheme, Theme, FluentWindow, NavigationAvatarWidget,
                            qrouter, SubtitleLabel, setFont, BodyLabel, PushButton,
                            PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox)
 
-from ..core.database_manager import DatabaseManager
-from ..core.config_manager import ConfigManager
-from ..core.folder_monitor import FolderMonitor
-from ..core.email_sender import EmailSenderFactory
-from ..core.template_engine import EmailTemplateEngine
-from ..utils.logger import setup_logger
+from core.database_manager import DatabaseManager  # Changed relative import
+from core.config_manager import ConfigManager
+from core.folder_monitor import FolderMonitor
+from core.email_sender import EmailSenderFactory
+from core.template_engine import EmailTemplateEngine
+from utils.logger import setup_logger
 
 class EmailAutomationWorker(QThread):
     """Worker thread for email automation"""
-    file_processed = pyqtSignal(str, str, bool)  # file_path, key, success
-    error_occurred = pyqtSignal(str)
+    file_processed = Signal(str, str, bool)  # file_path, key, success
+    error_occurred = Signal(str)
 
     def __init__(self, config_manager, database_manager, template_engine):
         super().__init__()
