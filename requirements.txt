@@ -1,0 +1,6 @@
+PySide6==6.5.0
+PyQt-Fluent-Widgets==1.4.0
+watchdog==3.0.0
+Jinja2==3.1.2
+pywin32==306
+pyinstaller==5.13.2

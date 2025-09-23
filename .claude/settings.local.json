@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p src/ui src/core src/models src/utils database config/profiles templates logs sent)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
