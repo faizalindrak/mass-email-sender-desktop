@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .content { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <p>Dear {{ contact_name }},</p>
+        <p>Terlampir file {{ filename }} untuk {{ supplier_name }}.</p>
+        <p>Mohon untuk review dan proses sesuai kebutuhan.</p>
+        <br>
+        <p>Best regards,<br>{{ current_user }}</p>
+    </div>
+</body>
+</html>

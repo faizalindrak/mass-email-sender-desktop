@@ -103,7 +103,7 @@ class EmailAutomationWorker(QThread):
             self.logger.error(f"Error processing file {file_path}: {str(e)}")
             self.error_occurred.emit(f"Error processing {os.path.basename(file_path)}: {str(e)}")
 
-class MainWindow(FluentWindow):
+class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
     """Main application window"""
 
     def __init__(self):
@@ -155,7 +155,7 @@ class MainWindow(FluentWindow):
         # Set splitter proportions
         splitter.setSizes([300, 500, 400])
 
-        # Status bar
+        # Create status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
@@ -170,14 +170,14 @@ class MainWindow(FluentWindow):
 
         # Profile selection
         layout.addWidget(QLabel("Profile:"))
-        self.profile_combo = ComboBox()
+        self.profile_combo = QComboBox()  # Changed from ComboBox to QComboBox
         layout.addWidget(self.profile_combo)
 
         # Monitor folder
         layout.addWidget(QLabel("Monitor Folder:"))
         folder_layout = QHBoxLayout()
-        self.monitor_folder_edit = LineEdit()
-        self.browse_monitor_btn = PushButton("Browse")
+        self.monitor_folder_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
+        self.browse_monitor_btn = QPushButton("Browse")  # Changed from PushButton to QPushButton
         folder_layout.addWidget(self.monitor_folder_edit)
         folder_layout.addWidget(self.browse_monitor_btn)
         layout.addLayout(folder_layout)
@@ -185,27 +185,28 @@ class MainWindow(FluentWindow):
         # Sent folder
         layout.addWidget(QLabel("Sent Folder:"))
         sent_layout = QHBoxLayout()
-        self.sent_folder_edit = LineEdit()
-        self.browse_sent_btn = PushButton("Browse")
+        self.sent_folder_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
+        self.browse_sent_btn = QPushButton("Browse")  # Changed from PushButton to QPushButton
         sent_layout.addWidget(self.sent_folder_edit)
         sent_layout.addWidget(self.browse_sent_btn)
         layout.addLayout(sent_layout)
 
         # Key pattern
         layout.addWidget(QLabel("Key Pattern (Regex):"))
-        self.key_pattern_edit = LineEdit()
+        self.key_pattern_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
         layout.addWidget(self.key_pattern_edit)
 
         # Email client
         layout.addWidget(QLabel("Email Client:"))
-        self.email_client_combo = ComboBox()
+        self.email_client_combo = QComboBox()  # Changed from ComboBox to QComboBox
         self.email_client_combo.addItems(["outlook", "smtp"])
         layout.addWidget(self.email_client_combo)
 
         # Control buttons
         button_layout = QVBoxLayout()
-        self.start_btn = PrimaryPushButton("Start Monitoring")
-        self.stop_btn = PushButton("Stop Monitoring")
+        self.start_btn = QPushButton("Start Monitoring")  # Changed from PrimaryPushButton to QPushButton
+        self.start_btn.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; }")
+        self.stop_btn = QPushButton("Stop Monitoring")  # Changed from PushButton to QPushButton
         self.stop_btn.setEnabled(False)
         button_layout.addWidget(self.start_btn)
         button_layout.addWidget(self.stop_btn)
@@ -227,24 +228,24 @@ class MainWindow(FluentWindow):
         subject_widget = QWidget()
         subject_layout = QVBoxLayout(subject_widget)
         subject_layout.addWidget(QLabel("Subject Template:"))
-        self.subject_template_edit = LineEdit()
+        self.subject_template_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
         subject_layout.addWidget(self.subject_template_edit)
 
         # Body template tab
         body_widget = QWidget()
         body_layout = QVBoxLayout(body_widget)
         body_layout.addWidget(QLabel("Body Template:"))
-        self.body_template_edit = TextEdit()
+        self.body_template_edit = QTextEdit()  # Changed from TextEdit to QTextEdit
         body_layout.addWidget(self.body_template_edit)
 
         # Preview tab
         preview_widget = QWidget()
         preview_layout = QVBoxLayout(preview_widget)
         preview_layout.addWidget(QLabel("Preview:"))
-        self.preview_text = TextEdit()
+        self.preview_text = QTextEdit()  # Changed from TextEdit to QTextEdit
         self.preview_text.setReadOnly(True)
         preview_layout.addWidget(self.preview_text)
-        self.preview_btn = PushButton("Generate Preview")
+        self.preview_btn = QPushButton("Generate Preview")  # Changed from PushButton to QPushButton
         preview_layout.addWidget(self.preview_btn)
 
         tab_widget.addTab(subject_widget, "Subject")
@@ -459,10 +460,11 @@ class MainWindow(FluentWindow):
 
         # Add to recent files
         item = QListWidgetItem(f"{filename} ({key}) - {status}")
+        # Remove FluentIcon usage for now - use simple text indicators
         if success:
-            item.setIcon(FluentIcon.ACCEPT)
+            item.setText(f"✓ {filename} ({key}) - {status}")
         else:
-            item.setIcon(FluentIcon.CANCEL)
+            item.setText(f"✗ {filename} ({key}) - {status}")
         self.recent_files_list.insertItem(0, item)
 
         # Update files processed counter

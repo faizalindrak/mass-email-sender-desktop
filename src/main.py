@@ -40,17 +40,19 @@ def main():
     print("Starting main function...")
 
     try:
-        # Enable high DPI scaling
-        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
-        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
-
-        # Create application
+        # Create application first
         print("Creating QApplication...")
         app = QApplication(sys.argv)
         app.setApplicationName("Email Automation Desktop")
         app.setApplicationVersion("1.0.0")
         app.setOrganizationName("Email Automation")
+
+        # Enable high DPI scaling (remove deprecated warnings)
+        # These are deprecated in newer Qt versions but still needed for older versions
+        try:
+            QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        except:
+            pass
 
         # Setup theme
         print("Setting up theme...")
@@ -77,7 +79,7 @@ def main():
         template_engine = EmailTemplateEngine(config_manager.get_template_dir())
         template_engine.create_default_templates()
 
-        # Create and show main window
+        # Create and show main window (after QApplication is created)
         print("Creating main window...")
         window = MainWindow()
         print("Showing main window...")
@@ -104,6 +106,7 @@ def main():
         # Try to show error dialog if QApplication exists
         try:
             if 'app' in locals():
+                from PySide6.QtWidgets import QMessageBox
                 QMessageBox.critical(None, "Error", f"Failed to start application:\n{str(e)}")
         except:
             pass
