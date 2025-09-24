@@ -1,10 +1,11 @@
 import sys
 import os
 import time
+import json
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                              QGridLayout, QSplitter, QTabWidget,
-                              QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
-                              QFileDialog, QMessageBox)
+                               QGridLayout, QSplitter, QTabWidget,
+                               QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
+                               QFileDialog, QMessageBox)
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QIcon, QFont
 
@@ -242,155 +243,141 @@ class MainWindow(FluentWindow):
         widget = ScrollArea()
         widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         widget.setWidgetResizable(True)
-        
+
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setSpacing(24)
-        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
 
         # Title
         title_label = TitleLabel("Email Automation Configuration")
         layout.addWidget(title_label)
-        layout.addSpacing(16)
+        layout.addSpacing(8)
 
         # Profile Management Card
         profile_card = GroupHeaderCardWidget("Profile Management")
         profile_layout = QVBoxLayout()
-        profile_layout.setSpacing(12)
-        profile_layout.setContentsMargins(20, 20, 20, 20)
+        profile_layout.setSpacing(8)
+        profile_layout.setContentsMargins(12, 12, 12, 12)
 
-        # Profile selection row
-        profile_label_row = QHBoxLayout()
-        profile_label_row.addWidget(StrongBodyLabel("Current Profile:"))
-        profile_label_row.addStretch()
-        profile_layout.addLayout(profile_label_row)
-        
-        profile_row = QHBoxLayout()
-        profile_row.setSpacing(12)
+        # Profile selection row using grid layout
+        profile_grid = QGridLayout()
+        profile_grid.setSpacing(8)
+
+        profile_label = StrongBodyLabel("Current Profile:")
         self.profile_combo = ComboBox()
         self.profile_combo.setMinimumWidth(200)
         self.load_profile_btn = PushButton(FluentIcon.FOLDER, "Load")
         self.save_profile_btn = PrimaryPushButton(FluentIcon.SAVE, "Save")
-        profile_row.addWidget(self.profile_combo)
-        profile_row.addWidget(self.load_profile_btn)
-        profile_row.addWidget(self.save_profile_btn)
-        profile_row.addStretch()
-        profile_layout.addLayout(profile_row)
-        
+
+        profile_grid.addWidget(profile_label, 0, 0)
+        profile_grid.addWidget(self.profile_combo, 0, 1)
+        profile_grid.addWidget(self.load_profile_btn, 0, 2)
+        profile_grid.addWidget(self.save_profile_btn, 0, 3)
+        profile_grid.setColumnStretch(4, 1)
+
+        profile_layout.addLayout(profile_grid)
         profile_card.viewLayout.addLayout(profile_layout)
         layout.addWidget(profile_card)
 
         # System Paths Card
         paths_card = GroupHeaderCardWidget("System Paths")
         paths_layout = QVBoxLayout()
-        paths_layout.setSpacing(16)
-        paths_layout.setContentsMargins(20, 20, 20, 20)
+        paths_layout.setSpacing(8)
+        paths_layout.setContentsMargins(12, 12, 12, 12)
 
-        # Database file
-        db_row = QHBoxLayout()
-        db_row.addWidget(StrongBodyLabel("Database File:"))
-        db_row.addStretch()
-        paths_layout.addLayout(db_row)
-        
-        db_input_row = QHBoxLayout()
-        db_input_row.setSpacing(12)
+        # Database file row
+        db_grid = QGridLayout()
+        db_grid.setSpacing(8)
+        db_label = StrongBodyLabel("Database File:")
         self.database_path_edit = LineEdit()
         self.database_path_edit.setPlaceholderText("Select database file...")
-        self.database_path_edit.setMinimumWidth(400)
+        self.database_path_edit.setMinimumWidth(300)
         self.browse_database_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_database_btn.setFixedWidth(100)
-        db_input_row.addWidget(self.database_path_edit)
-        db_input_row.addWidget(self.browse_database_btn)
-        paths_layout.addLayout(db_input_row)
-        
-        paths_layout.addSpacing(8)
+        db_grid.addWidget(db_label, 0, 0)
+        db_grid.addWidget(self.database_path_edit, 0, 1)
+        db_grid.addWidget(self.browse_database_btn, 0, 2)
+        db_grid.setColumnStretch(1, 1)
+        paths_layout.addLayout(db_grid)
 
-        # Template folder
-        tpl_row = QHBoxLayout()
-        tpl_row.addWidget(StrongBodyLabel("Template Folder:"))
-        tpl_row.addStretch()
-        paths_layout.addLayout(tpl_row)
-        
-        tpl_input_row = QHBoxLayout()
-        tpl_input_row.setSpacing(12)
+        # Template folder row
+        tpl_grid = QGridLayout()
+        tpl_grid.setSpacing(8)
+        tpl_label = StrongBodyLabel("Template Folder:")
         self.template_dir_edit = LineEdit()
         self.template_dir_edit.setPlaceholderText("Select template folder...")
-        self.template_dir_edit.setMinimumWidth(400)
+        self.template_dir_edit.setMinimumWidth(300)
         self.browse_template_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_template_btn.setFixedWidth(100)
-        tpl_input_row.addWidget(self.template_dir_edit)
-        tpl_input_row.addWidget(self.browse_template_btn)
-        paths_layout.addLayout(tpl_input_row)
-        
+        tpl_grid.addWidget(tpl_label, 0, 0)
+        tpl_grid.addWidget(self.template_dir_edit, 0, 1)
+        tpl_grid.addWidget(self.browse_template_btn, 0, 2)
+        tpl_grid.setColumnStretch(1, 1)
+        paths_layout.addLayout(tpl_grid)
+
         paths_card.viewLayout.addLayout(paths_layout)
         layout.addWidget(paths_card)
 
         # Monitoring Settings Card
         monitoring_card = GroupHeaderCardWidget("Monitoring Settings")
         monitoring_layout = QVBoxLayout()
-        monitoring_layout.setSpacing(16)
-        monitoring_layout.setContentsMargins(20, 20, 20, 20)
+        monitoring_layout.setSpacing(8)
+        monitoring_layout.setContentsMargins(12, 12, 12, 12)
 
-        # Monitor folder
-        monitor_row = QHBoxLayout()
-        monitor_row.addWidget(StrongBodyLabel("Monitor Folder:"))
-        monitor_row.addStretch()
-        monitoring_layout.addLayout(monitor_row)
-        
-        monitor_input_row = QHBoxLayout()
-        monitor_input_row.setSpacing(12)
+        # Monitor folder row
+        monitor_grid = QGridLayout()
+        monitor_grid.setSpacing(8)
+        monitor_label = StrongBodyLabel("Monitor Folder:")
         self.monitor_folder_edit = LineEdit()
         self.monitor_folder_edit.setPlaceholderText("Select folder to monitor...")
-        self.monitor_folder_edit.setMinimumWidth(400)
+        self.monitor_folder_edit.setMinimumWidth(300)
         self.browse_monitor_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_monitor_btn.setFixedWidth(100)
-        monitor_input_row.addWidget(self.monitor_folder_edit)
-        monitor_input_row.addWidget(self.browse_monitor_btn)
-        monitoring_layout.addLayout(monitor_input_row)
-        
-        monitoring_layout.addSpacing(8)
+        monitor_grid.addWidget(monitor_label, 0, 0)
+        monitor_grid.addWidget(self.monitor_folder_edit, 0, 1)
+        monitor_grid.addWidget(self.browse_monitor_btn, 0, 2)
+        monitor_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(monitor_grid)
 
-        # Sent folder
-        sent_row = QHBoxLayout()
-        sent_row.addWidget(StrongBodyLabel("Sent Folder:"))
-        sent_row.addStretch()
-        monitoring_layout.addLayout(sent_row)
-        
-        sent_input_row = QHBoxLayout()
-        sent_input_row.setSpacing(12)
+        # Sent folder row
+        sent_grid = QGridLayout()
+        sent_grid.setSpacing(8)
+        sent_label = StrongBodyLabel("Sent Folder:")
         self.sent_folder_edit = LineEdit()
         self.sent_folder_edit.setPlaceholderText("Select sent files folder...")
-        self.sent_folder_edit.setMinimumWidth(400)
+        self.sent_folder_edit.setMinimumWidth(300)
         self.browse_sent_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_sent_btn.setFixedWidth(100)
-        sent_input_row.addWidget(self.sent_folder_edit)
-        sent_input_row.addWidget(self.browse_sent_btn)
-        monitoring_layout.addLayout(sent_input_row)
-        
-        monitoring_layout.addSpacing(8)
+        sent_grid.addWidget(sent_label, 0, 0)
+        sent_grid.addWidget(self.sent_folder_edit, 0, 1)
+        sent_grid.addWidget(self.browse_sent_btn, 0, 2)
+        sent_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(sent_grid)
 
-        # Key pattern
-        pattern_row = QHBoxLayout()
-        pattern_row.addWidget(StrongBodyLabel("Key Pattern (Regex):"))
-        pattern_row.addStretch()
-        monitoring_layout.addLayout(pattern_row)
-        
+        # Key pattern row
+        pattern_grid = QGridLayout()
+        pattern_grid.setSpacing(8)
+        pattern_label = StrongBodyLabel("Key Pattern (Regex):")
         self.key_pattern_edit = LineEdit()
         self.key_pattern_edit.setPlaceholderText("Enter regex pattern to extract keys from filenames...")
-        monitoring_layout.addWidget(self.key_pattern_edit)
-        
-        monitoring_layout.addSpacing(8)
+        self.key_pattern_edit.setMinimumWidth(300)
+        pattern_grid.addWidget(pattern_label, 0, 0)
+        pattern_grid.addWidget(self.key_pattern_edit, 0, 1)
+        pattern_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(pattern_grid)
 
-        # Email client
-        client_row = QHBoxLayout()
-        client_row.addWidget(StrongBodyLabel("Email Client:"))
-        client_row.addStretch()
-        monitoring_layout.addLayout(client_row)
-        
+        # Email client row
+        client_grid = QGridLayout()
+        client_grid.setSpacing(8)
+        client_label = StrongBodyLabel("Email Client:")
         self.email_client_combo = ComboBox()
         self.email_client_combo.addItems(["outlook", "thunderbird", "smtp"])
         self.email_client_combo.setMinimumWidth(200)
-        monitoring_layout.addWidget(self.email_client_combo)
+        client_grid.addWidget(client_label, 0, 0)
+        client_grid.addWidget(self.email_client_combo, 0, 1)
+        client_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(client_grid)
 
         monitoring_card.viewLayout.addLayout(monitoring_layout)
         layout.addWidget(monitoring_card)
@@ -398,8 +385,8 @@ class MainWindow(FluentWindow):
         # File Extensions Card
         extensions_card = GroupHeaderCardWidget("File Types to Monitor")
         extensions_layout = QVBoxLayout()
-        extensions_layout.setSpacing(12)
-        extensions_layout.setContentsMargins(20, 20, 20, 20)
+        extensions_layout.setSpacing(8)
+        extensions_layout.setContentsMargins(12, 12, 12, 12)
 
         # Extension controls
         ext_controls_layout = QHBoxLayout()
@@ -414,75 +401,75 @@ class MainWindow(FluentWindow):
         extensions_layout.addLayout(ext_controls_layout)
 
         self.extensions_list = ListWidget()
-        self.extensions_list.setMaximumHeight(120)
+        self.extensions_list.setMaximumHeight(90)
         extensions_layout.addWidget(self.extensions_list)
-        
+
         extensions_card.viewLayout.addLayout(extensions_layout)
         layout.addWidget(extensions_card)
 
         # Variables Card
         variables_card = GroupHeaderCardWidget("Constant Variables")
         variables_layout = QVBoxLayout()
-        variables_layout.setSpacing(16)
-        variables_layout.setContentsMargins(20, 20, 20, 20)
+        variables_layout.setSpacing(8)
+        variables_layout.setContentsMargins(12, 12, 12, 12)
 
-        # Default CC emails
-        cc_row = QHBoxLayout()
-        cc_row.addWidget(StrongBodyLabel("Default CC:"))
-        cc_row.addStretch()
-        variables_layout.addLayout(cc_row)
-        
+        # Default CC emails row
+        cc_grid = QGridLayout()
+        cc_grid.setSpacing(8)
+        cc_label = StrongBodyLabel("Default CC:")
         self.default_cc_edit = LineEdit()
         self.default_cc_edit.setPlaceholderText("Default CC emails (semicolon separated)")
-        variables_layout.addWidget(self.default_cc_edit)
-        
-        variables_layout.addSpacing(8)
+        self.default_cc_edit.setMinimumWidth(300)
+        cc_grid.addWidget(cc_label, 0, 0)
+        cc_grid.addWidget(self.default_cc_edit, 0, 1)
+        cc_grid.setColumnStretch(1, 1)
+        variables_layout.addLayout(cc_grid)
 
-        # Default BCC emails
-        bcc_row = QHBoxLayout()
-        bcc_row.addWidget(StrongBodyLabel("Default BCC:"))
-        bcc_row.addStretch()
-        variables_layout.addLayout(bcc_row)
-        
+        # Default BCC emails row
+        bcc_grid = QGridLayout()
+        bcc_grid.setSpacing(8)
+        bcc_label = StrongBodyLabel("Default BCC:")
         self.default_bcc_edit = LineEdit()
         self.default_bcc_edit.setPlaceholderText("Default BCC emails (semicolon separated)")
-        variables_layout.addWidget(self.default_bcc_edit)
-        
-        variables_layout.addSpacing(8)
+        self.default_bcc_edit.setMinimumWidth(300)
+        bcc_grid.addWidget(bcc_label, 0, 0)
+        bcc_grid.addWidget(self.default_bcc_edit, 0, 1)
+        bcc_grid.setColumnStretch(1, 1)
+        variables_layout.addLayout(bcc_grid)
 
-        # Custom variable 1
-        custom1_row = QHBoxLayout()
-        custom1_row.addWidget(StrongBodyLabel("Custom Variable 1:"))
-        custom1_row.addStretch()
-        variables_layout.addLayout(custom1_row)
-        
-        custom1_layout = QHBoxLayout()
-        custom1_layout.setSpacing(8)
+        # Custom variable 1 row
+        custom1_grid = QGridLayout()
+        custom1_grid.setSpacing(8)
+        custom1_label = StrongBodyLabel("Custom Variable 1:")
         self.custom1_name_edit = LineEdit()
         self.custom1_name_edit.setPlaceholderText("Variable name")
+        self.custom1_name_edit.setMinimumWidth(140)
         self.custom1_value_edit = LineEdit()
         self.custom1_value_edit.setPlaceholderText("Variable value")
-        custom1_layout.addWidget(self.custom1_name_edit)
-        custom1_layout.addWidget(self.custom1_value_edit)
-        variables_layout.addLayout(custom1_layout)
-        
-        variables_layout.addSpacing(8)
+        self.custom1_value_edit.setMinimumWidth(140)
+        custom1_grid.addWidget(custom1_label, 0, 0)
+        custom1_grid.addWidget(self.custom1_name_edit, 0, 1)
+        custom1_grid.addWidget(self.custom1_value_edit, 0, 2)
+        custom1_grid.setColumnStretch(1, 1)
+        custom1_grid.setColumnStretch(2, 1)
+        variables_layout.addLayout(custom1_grid)
 
-        # Custom variable 2
-        custom2_row = QHBoxLayout()
-        custom2_row.addWidget(StrongBodyLabel("Custom Variable 2:"))
-        custom2_row.addStretch()
-        variables_layout.addLayout(custom2_row)
-        
-        custom2_layout = QHBoxLayout()
-        custom2_layout.setSpacing(8)
+        # Custom variable 2 row
+        custom2_grid = QGridLayout()
+        custom2_grid.setSpacing(8)
+        custom2_label = StrongBodyLabel("Custom Variable 2:")
         self.custom2_name_edit = LineEdit()
         self.custom2_name_edit.setPlaceholderText("Variable name")
+        self.custom2_name_edit.setMinimumWidth(140)
         self.custom2_value_edit = LineEdit()
         self.custom2_value_edit.setPlaceholderText("Variable value")
-        custom2_layout.addWidget(self.custom2_name_edit)
-        custom2_layout.addWidget(self.custom2_value_edit)
-        variables_layout.addLayout(custom2_layout)
+        self.custom2_value_edit.setMinimumWidth(140)
+        custom2_grid.addWidget(custom2_label, 0, 0)
+        custom2_grid.addWidget(self.custom2_name_edit, 0, 1)
+        custom2_grid.addWidget(self.custom2_value_edit, 0, 2)
+        custom2_grid.setColumnStretch(1, 1)
+        custom2_grid.setColumnStretch(2, 1)
+        variables_layout.addLayout(custom2_grid)
 
         variables_card.viewLayout.addLayout(variables_layout)
         layout.addWidget(variables_card)
@@ -490,15 +477,15 @@ class MainWindow(FluentWindow):
         # Control Card
         control_card = SimpleCardWidget()
         control_layout = QVBoxLayout(control_card)
-        control_layout.setContentsMargins(24, 24, 24, 24)
-        
+        control_layout.setContentsMargins(16, 16, 16, 16)
+
         self.toggle_monitoring_btn = PrimaryPushButton(FluentIcon.PLAY, "Start Monitoring")
-        self.toggle_monitoring_btn.setFixedHeight(48)
-        self.toggle_monitoring_btn.setMinimumWidth(200)
+        self.toggle_monitoring_btn.setFixedHeight(40)
+        self.toggle_monitoring_btn.setMinimumWidth(160)
         control_layout.addWidget(self.toggle_monitoring_btn)
 
         layout.addWidget(control_card)
-        layout.addSpacing(24)
+        layout.addSpacing(12)
 
         widget.setWidget(content_widget)
         return widget
