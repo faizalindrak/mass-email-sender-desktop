@@ -57,7 +57,7 @@ class ConfigManager:
             "sent_folder": "sent",
             "key_pattern": "([A-Z]{2}\\d{3})",
             "email_client": "outlook",
-            "subject_template": "Document - [filename_without_ext]",
+            "subject_template": "[filename_without_ext]",
             "body_template": "default_template.html",
             "auto_start": False,
             "file_extensions": [".pdf", ".xlsx", ".docx", ".txt"],

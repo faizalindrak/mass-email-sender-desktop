@@ -69,7 +69,7 @@ class EmailAutomationWorker(QThread):
 
             # Render subject
             subject = self.template_engine.process_simple_variables(
-                profile_config.get('subject_template', 'Document - [filename_without_ext]'),
+                profile_config.get('subject_template', '[filename_without_ext]'),
                 variables
             )
 
@@ -90,6 +90,14 @@ class EmailAutomationWorker(QThread):
             # Merge supplier CC/BCC with default CC/BCC from profile
             merged_cc = (supplier.get('cc_emails', []) or []) + default_cc_list
             merged_bcc = (supplier.get('bcc_emails', []) or []) + default_bcc_list
+            
+            # Debug logging for CC/BCC
+            self.logger.info(f"Default CC from profile: {default_cc_list}")
+            self.logger.info(f"Default BCC from profile: {default_bcc_list}")
+            self.logger.info(f"Supplier CC: {supplier.get('cc_emails', [])}")
+            self.logger.info(f"Supplier BCC: {supplier.get('bcc_emails', [])}")
+            self.logger.info(f"Merged CC: {merged_cc}")
+            self.logger.info(f"Merged BCC: {merged_bcc}")
 
             # Send email
             success = email_sender.send_email(
@@ -282,14 +290,11 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
 
         layout.addWidget(const_vars_group)
 
-        # Control buttons
+        # Control buttons - Single toggle button
         button_layout = QVBoxLayout()
-        self.start_btn = QPushButton("Start Monitoring")  # Changed from PrimaryPushButton to QPushButton
-        self.start_btn.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; }")
-        self.stop_btn = QPushButton("Stop Monitoring")  # Changed from PushButton to QPushButton
-        self.stop_btn.setEnabled(False)
-        button_layout.addWidget(self.start_btn)
-        button_layout.addWidget(self.stop_btn)
+        self.toggle_monitoring_btn = QPushButton("Start Monitoring")
+        self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; }")
+        button_layout.addWidget(self.toggle_monitoring_btn)
         layout.addLayout(button_layout)
 
         layout.addStretch()
@@ -434,8 +439,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
     def init_connections(self):
         """Initialize signal connections"""
         # Buttons
-        self.start_btn.clicked.connect(self.start_monitoring)
-        self.stop_btn.clicked.connect(self.stop_monitoring)
+        self.toggle_monitoring_btn.clicked.connect(self.toggle_monitoring)
         self.browse_monitor_btn.clicked.connect(self.browse_monitor_folder)
         self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
         self.browse_database_btn.clicked.connect(self.browse_database_file)
@@ -603,6 +607,13 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
 
+    def toggle_monitoring(self):
+        """Toggle folder monitoring on/off"""
+        if self.is_monitoring:
+            self.stop_monitoring()
+        else:
+            self.start_monitoring()
+
     def start_monitoring(self):
         """Start folder monitoring"""
         try:
@@ -625,8 +636,8 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
 
             if success:
                 self.is_monitoring = True
-                self.start_btn.setEnabled(False)
-                self.stop_btn.setEnabled(True)
+                self.toggle_monitoring_btn.setText("Stop Monitoring")
+                self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #d73527; color: white; font-weight: bold; }")
                 self.status_label.setText("Monitoring: Active")
                 self.status_label.setStyleSheet("color: green; font-weight: bold;")
                 self.status_bar.showMessage(f"Monitoring folder: {monitor_folder}")
@@ -639,8 +650,8 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         try:
             self.worker.folder_monitor.stop_monitoring()
             self.is_monitoring = False
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(False)
+            self.toggle_monitoring_btn.setText("Start Monitoring")
+            self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; }")
             self.status_label.setText("Monitoring: Stopped")
             self.status_label.setStyleSheet("color: red; font-weight: bold;")
             self.status_bar.showMessage("Monitoring stopped")
@@ -686,7 +697,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 'email_client': self.email_client_combo.currentText(),
 
                 # Templates
-                'subject_template': existing.get('subject_template', 'Document - [filename_without_ext]'),
+                'subject_template': existing.get('subject_template', '[filename_without_ext]'),
                 'body_template': selected_template,
 
                 # Preserve file extensions if existing
@@ -1002,7 +1013,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             cursor.insertText(var_name)
 
     def generate_preview(self):
-        """Generate preview from email form content"""
+        """Generate preview from email form content using real files from monitoring folder"""
         try:
             subject = self.email_subject_edit.text()
             body = self.email_body_edit.toPlainText()
@@ -1010,34 +1021,72 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             cc_emails = self.cc_emails_edit.text()
             bcc_emails = self.bcc_emails_edit.text()
 
-            # Get sample data for preview
-            sample_data = {
-                'filename': 'TT003_invoice_2024.pdf',
-                'filename_without_ext': 'TT003_invoice_2024',
-                'filepath': 'C:/Monitor/TT003_invoice_2024.pdf',
-                'supplier_code': 'TT003',
-                'supplier_name': 'TOKO TOKO ABADI',
-                'contact_name': 'John Doe',
-                'emails': 'john@tokotokoabadi.com',
-                'cc_emails': self.default_cc_edit.text() or 'cc@company.com',
-                'bcc_emails': self.default_bcc_edit.text() or 'bcc@company.com',
-                'date': '2024-01-15',
-                'time': '10:30:00'
-            }
+            # Try to get real file from monitoring folder
+            monitor_folder = self.monitor_folder_edit.text().strip()
+            sample_data = None
+            
+            if monitor_folder and os.path.exists(monitor_folder):
+                # Look for files in monitoring folder that match the pattern
+                key_pattern = self.key_pattern_edit.text().strip()
+                if key_pattern:
+                    try:
+                        import re
+                        pattern = re.compile(key_pattern)
+                        
+                        for filename in os.listdir(monitor_folder):
+                            file_path = os.path.join(monitor_folder, filename)
+                            if os.path.isfile(file_path):
+                                match = pattern.search(filename)
+                                if match:
+                                    key = match.group(1) if match.groups() else match.group(0)
+                                    
+                                    # Try to get supplier data for this key
+                                    supplier = self.database_manager.get_supplier_by_key(key)
+                                    if supplier:
+                                        # Use real data from file and database
+                                        custom_vars = {}
+                                        if self.custom1_name_edit.text():
+                                            custom_vars[self.custom1_name_edit.text()] = self.custom1_value_edit.text()
+                                        if self.custom2_name_edit.text():
+                                            custom_vars[self.custom2_name_edit.text()] = self.custom2_value_edit.text()
+                                            
+                                        sample_data = self.template_engine.prepare_variables(file_path, supplier, custom_vars)
+                                        sample_data['cc_emails'] = self.default_cc_edit.text() or supplier.get('cc_emails', [])
+                                        sample_data['bcc_emails'] = self.default_bcc_edit.text() or supplier.get('bcc_emails', [])
+                                        break
+                    except Exception as e:
+                        self.logger.warning(f"Error scanning monitoring folder: {str(e)}")
 
-            # Add custom variables
-            if self.custom1_name_edit.text():
-                sample_data[self.custom1_name_edit.text()] = self.custom1_value_edit.text()
-            if self.custom2_name_edit.text():
-                sample_data[self.custom2_name_edit.text()] = self.custom2_value_edit.text()
+            # Fallback to sample data if no real files found
+            if not sample_data:
+                sample_data = {
+                    'filename': 'TT003_invoice_2024.pdf',
+                    'filename_without_ext': 'TT003_invoice_2024',
+                    'filepath': os.path.join(monitor_folder or 'C:/Monitor', 'TT003_invoice_2024.pdf'),
+                    'supplier_code': 'TT003',
+                    'supplier_name': 'TOKO TOKO ABADI',
+                    'contact_name': 'John Doe',
+                    'emails': 'john@tokotokoabadi.com',
+                    'cc_emails': self.default_cc_edit.text() or 'cc@company.com',
+                    'bcc_emails': self.default_bcc_edit.text() or 'bcc@company.com',
+                    'date': '2024-01-15',
+                    'time': '10:30:00'
+                }
+                
+                # Add custom variables
+                if self.custom1_name_edit.text():
+                    sample_data[self.custom1_name_edit.text()] = self.custom1_value_edit.text()
+                if self.custom2_name_edit.text():
+                    sample_data[self.custom2_name_edit.text()] = self.custom2_value_edit.text()
 
             # Process variables in subject and body
             processed_subject = self.template_engine.process_simple_variables(subject, sample_data)
             processed_body = self.template_engine.process_simple_variables(body, sample_data)
 
-            # Create preview HTML
+            # Create preview HTML with indication of data source
+            data_source = "Real file data" if 'filepath' in sample_data and os.path.exists(sample_data['filepath']) else "Sample data"
             preview_html = f"""
-            <h3>Email Preview</h3>
+            <h3>Email Preview ({data_source})</h3>
             <p><strong>To:</strong> {to_emails or '[To be filled from database]'}</p>
             <p><strong>CC:</strong> {cc_emails}</p>
             <p><strong>BCC:</strong> {bcc_emails}</p>
