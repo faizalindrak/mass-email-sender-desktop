@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QGridLayout, QSplitter, QTabWidget, QGroupBox,
                               QLabel, QLineEdit, QPushButton, QComboBox, QTextEdit,
@@ -137,6 +138,12 @@ class EmailAutomationWorker(QThread):
         except Exception as e:
             self.logger.error(f"Error processing file {file_path}: {str(e)}")
             self.error_occurred.emit(f"Error processing {os.path.basename(file_path)}: {str(e)}")
+        finally:
+            # Ensure a 2-second delay between processing/sending files
+            try:
+                time.sleep(2)
+            except Exception:
+                pass
 
 class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
     """Main application window"""
@@ -696,7 +703,19 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #d73527; color: white; font-weight: bold; }")
                 self.status_label.setText("Monitoring: Active")
                 self.status_label.setStyleSheet("color: green; font-weight: bold;")
-                self.status_bar.showMessage(f"Monitoring folder: {monitor_folder}")
+
+                # Process existing files in the folder on start so not only new files are sent
+                try:
+                    processed_existing = self.worker.folder_monitor.process_existing_files(
+                        folder_path=monitor_folder,
+                        callback=self.worker.process_file,
+                        key_pattern=profile_config['key_pattern'],
+                        file_extensions=profile_config.get('file_extensions', [])
+                    )
+                    self.status_bar.showMessage(f"Monitoring folder: {monitor_folder} | Existing files processed: {len(processed_existing)}")
+                except Exception as pe:
+                    # Even if processing existing files fails, keep monitoring running
+                    self.status_bar.showMessage(f"Monitoring folder: {monitor_folder} | Failed to process existing files: {str(pe)}")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to start monitoring: {str(e)}")
