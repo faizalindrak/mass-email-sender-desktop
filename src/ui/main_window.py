@@ -10,14 +10,15 @@ from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QIcon, QFont
 
 from qfluentwidgets import (FluentIcon, setTheme, Theme, FluentWindow, NavigationItemPosition,
-                           qrouter, SubtitleLabel, setFont, BodyLabel, PushButton, TitleLabel,
-                           PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox,
-                           CardWidget, SimpleCardWidget, HeaderCardWidget, GroupHeaderCardWidget,
-                           SwitchButton, ToggleButton, Pivot, PivotItem, ScrollArea,
-                           InfoBar, InfoBarPosition, StrongBodyLabel, CaptionLabel,
-                           TableWidget, ListWidget, TreeWidget, ProgressBar,
-                           ToolTip, TeachingTip, TeachingTipTailPosition, PopupTeachingTip,
-                           FlyoutViewBase, Flyout, FlyoutAnimationType)
+                            qrouter, SubtitleLabel, setFont, BodyLabel, PushButton, TitleLabel,
+                            PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox,
+                            CardWidget, SimpleCardWidget, HeaderCardWidget, GroupHeaderCardWidget,
+                            SwitchButton, ToggleButton, Pivot, PivotItem, ScrollArea,
+                            InfoBar, InfoBarPosition, StrongBodyLabel, CaptionLabel,
+                            TableWidget, ListWidget, TreeWidget, ProgressBar,
+                            ToolTip, TeachingTip, TeachingTipTailPosition, PopupTeachingTip,
+                            FlyoutViewBase, Flyout, FlyoutAnimationType)
+from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QScrollArea, QWidget, QHBoxLayout
 
 from core.database_manager import DatabaseManager  # Changed relative import
 from core.config_manager import ConfigManager
@@ -151,6 +152,89 @@ class EmailAutomationWorker(QThread):
                 time.sleep(2)
             except Exception:
                 pass
+
+class WrappingExtensionsWidget(QWidget):
+    """Custom widget for displaying file extensions in a wrapping layout"""
+
+    def __init__(self):
+        super().__init__()
+        self.checkboxes = {}  # Store extension -> checkbox mapping
+        self.init_ui()
+
+    def init_ui(self):
+        """Initialize the wrapping layout UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)  # Reduced spacing
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create scroll area for the extensions
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setMaximumHeight(120)  # Limit height
+
+        # Container widget for the grid layout
+        self.container = QWidget()
+        self.grid_layout = QGridLayout(self.container)
+        self.grid_layout.setSpacing(4)  # Reduced spacing
+        self.grid_layout.setContentsMargins(4, 4, 4, 4)  # Reduced margins
+
+        self.scroll_area.setWidget(self.container)
+        layout.addWidget(self.scroll_area)
+
+    def update_extensions(self, extensions, selected):
+        """Update the extensions with wrapping layout"""
+        # Clear existing checkboxes
+        self.clear_extensions()
+
+        # Create checkboxes for each extension
+        self.checkboxes = {}
+        row = 0
+        col = 0
+        max_cols = 6  # Maximum columns per row - increased for better horizontal layout
+
+        for ext in sorted(extensions):
+            checkbox = CheckBox(ext)
+            checkbox.setChecked(ext in selected)
+            self.checkboxes[ext] = checkbox
+
+            # Add to grid layout
+            self.grid_layout.addWidget(checkbox, row, col)
+
+            # Move to next column, wrap to next row if needed
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+
+        # Update container size
+        self.container.adjustSize()
+        self.scroll_area.updateGeometry()
+
+    def clear_extensions(self):
+        """Clear all extensions"""
+        # Remove all widgets from grid layout
+        for i in reversed(range(self.grid_layout.count())):
+            widget = self.grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        self.checkboxes.clear()
+
+    def get_selected_extensions(self):
+        """Get list of selected extensions"""
+        return [ext for ext, checkbox in self.checkboxes.items() if checkbox.isChecked()]
+
+    def select_all(self):
+        """Select all extensions"""
+        for checkbox in self.checkboxes.values():
+            checkbox.setChecked(True)
+
+    def clear_selection(self):
+        """Clear all selections"""
+        for checkbox in self.checkboxes.values():
+            checkbox.setChecked(False)
 
 class MainWindow(FluentWindow):
     """Main application window with Fluent Design"""
@@ -400,9 +484,8 @@ class MainWindow(FluentWindow):
         ext_controls_layout.addStretch()
         extensions_layout.addLayout(ext_controls_layout)
 
-        self.extensions_list = ListWidget()
-        self.extensions_list.setMaximumHeight(90)
-        extensions_layout.addWidget(self.extensions_list)
+        self.extensions_widget = WrappingExtensionsWidget()
+        extensions_layout.addWidget(self.extensions_widget)
 
         extensions_card.viewLayout.addLayout(extensions_layout)
         layout.addWidget(extensions_card)
@@ -1260,40 +1343,29 @@ class MainWindow(FluentWindow):
     def update_extensions_list(self, extensions, selected):
         """Update the extensions list with checkable items and preselected values"""
         try:
-            self.extensions_list.clear()
-            for ext in extensions:
-                item = QListWidgetItem(ext)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked if ext in selected else Qt.Unchecked)
-                self.extensions_list.addItem(item)
+            self.extensions_widget.update_extensions(extensions, selected)
         except Exception as e:
             self.logger.error(f"Failed to update extensions list: {str(e)}")
 
     def get_selected_extensions(self):
-        """Get currently selected extensions from the list"""
-        selected = []
+        """Get currently selected extensions from the widget"""
         try:
-            for i in range(self.extensions_list.count()):
-                item = self.extensions_list.item(i)
-                if item.checkState() == Qt.Checked:
-                    selected.append(item.text())
+            return self.extensions_widget.get_selected_extensions()
         except Exception as e:
             self.logger.error(f"Failed to read selected extensions: {str(e)}")
-        return selected
+            return []
 
     def select_all_extensions(self):
-        """Select all extensions in the list"""
+        """Select all extensions in the widget"""
         try:
-            for i in range(self.extensions_list.count()):
-                self.extensions_list.item(i).setCheckState(Qt.Checked)
+            self.extensions_widget.select_all()
         except Exception as e:
             self.logger.error(f"Failed to select all extensions: {str(e)}")
 
     def clear_extensions_selection(self):
-        """Clear all selections in the extensions list"""
+        """Clear all selections in the extensions widget"""
         try:
-            for i in range(self.extensions_list.count()):
-                self.extensions_list.item(i).setCheckState(Qt.Unchecked)
+            self.extensions_widget.clear_selection()
         except Exception as e:
             self.logger.error(f"Failed to clear extensions selection: {str(e)}")
 
