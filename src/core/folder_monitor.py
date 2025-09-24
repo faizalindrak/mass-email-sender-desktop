@@ -46,7 +46,7 @@ class FileHandler(FileSystemEventHandler):
 
 class FolderMonitor:
     def __init__(self):
-        self.observer = Observer()
+        self.observer = None
         self.is_monitoring = False
         self.current_handler = None
         self.monitor_path = None
@@ -68,6 +68,10 @@ class FolderMonitor:
                 self.logger.info(f"Created sent folder: {sent_folder}")
 
             self.current_handler = FileHandler(callback, key_pattern, file_extensions)
+            # Ensure a fresh Observer instance (watchdog threads cannot be restarted once stopped)
+            if self.observer and self.observer.is_alive():
+                self.stop_monitoring()
+            self.observer = Observer()
             self.observer.schedule(self.current_handler, folder_path, recursive=False)
             self.observer.start()
             self.is_monitoring = True
@@ -86,9 +90,11 @@ class FolderMonitor:
     def stop_monitoring(self):
         """Stop folder monitoring"""
         try:
-            if self.observer.is_alive():
+            if self.observer and self.observer.is_alive():
                 self.observer.stop()
                 self.observer.join(timeout=5)
+            # Reset observer to allow future restarts
+            self.observer = None
 
             self.is_monitoring = False
             self.current_handler = None

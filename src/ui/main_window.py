@@ -373,7 +373,6 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         # Available variables from database
         variables_layout.addWidget(QLabel("Available Variables:"))
         self.variables_list = QListWidget()
-        self.load_available_variables()
         variables_layout.addWidget(self.variables_list)
 
         # Variable insertion buttons
@@ -390,6 +389,8 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.sample_data_text.setReadOnly(True)
         self.sample_data_text.setMaximumHeight(150)
         variables_layout.addWidget(self.sample_data_text)
+        # Load variables after sample_data_text is initialized to avoid attribute errors
+        self.load_available_variables()
 
         # Preview tab
         preview_widget = QWidget()
