@@ -152,21 +152,36 @@ class EmailSenderFactory:
     def create_sender(client_type: str, **kwargs) -> EmailSenderBase:
         """Create email sender based on client type"""
 
-        if client_type.lower() == 'outlook':
+        client = client_type.lower()
+        if client == 'outlook':
             return OutlookSender()
 
-        elif client_type.lower() == 'thunderbird' or client_type.lower() == 'smtp':
-            required_params = ['smtp_server', 'smtp_port', 'username', 'password']
-            for param in required_params:
-                if param not in kwargs:
-                    raise ValueError(f"Missing required parameter for SMTP: {param}")
+        elif client in ('thunderbird', 'smtp'):
+            # Normalize kwargs to support both profile keys (smtp_*) and generic keys
+            smtp_server = kwargs.get('smtp_server') or kwargs.get('server')
+            smtp_port = kwargs.get('smtp_port') or kwargs.get('port')
+            username = kwargs.get('smtp_username') or kwargs.get('username')
+            password = kwargs.get('smtp_password') or kwargs.get('password')
+            use_tls = kwargs.get('smtp_use_tls')
+            if use_tls is None:
+                use_tls = kwargs.get('use_tls', True)
+
+            missing = [name for name, val in [
+                ('smtp_server', smtp_server),
+                ('smtp_port', smtp_port),
+                ('username', username),
+                ('password', password),
+            ] if val in (None, '')]
+
+            if missing:
+                raise ValueError(f"Missing required parameter for SMTP: {', '.join(missing)}")
 
             return ThunderbirdSender(
-                smtp_server=kwargs['smtp_server'],
-                smtp_port=kwargs['smtp_port'],
-                username=kwargs['username'],
-                password=kwargs['password'],
-                use_tls=kwargs.get('use_tls', True)
+                smtp_server=str(smtp_server),
+                smtp_port=int(smtp_port),
+                username=str(username),
+                password=str(password),
+                use_tls=bool(use_tls)
             )
 
         else:
@@ -184,7 +199,8 @@ class EmailSenderFactory:
         except:
             pass
 
-        # SMTP is always available
+        # Thunderbird label (SMTP) and SMTP are available
+        available.append('thunderbird')
         available.append('smtp')
 
         return available

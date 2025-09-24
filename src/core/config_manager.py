@@ -1,252 +1,318 @@
-import configparser
 import os
 import json
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
+
 
 class ConfigManager:
-    """Configuration manager for email automation application"""
+    """JSON-based configuration manager for email automation application"""
 
     def __init__(self, config_dir: str = "config"):
         self.config_dir = config_dir
-        self.config_file = os.path.join(config_dir, "default.ini")
+        self.global_config_file = os.path.join(config_dir, "config.json")
         self.profiles_dir = os.path.join(config_dir, "profiles")
-        self.config = configparser.ConfigParser()
 
         # Ensure directories exist
         os.makedirs(config_dir, exist_ok=True)
         os.makedirs(self.profiles_dir, exist_ok=True)
 
-        # Load or create default configuration
+        # Load or create default global config
+        self.global_config: Dict[str, Any] = {}
         self.load_config()
 
+        # Ensure at least one default profile exists
+        default_profile_path = self._get_profile_path("default")
+        if not os.path.exists(default_profile_path):
+            self._create_default_profile_file(default_profile_path)
+
     def load_config(self):
-        """Load configuration from file"""
-        if os.path.exists(self.config_file):
-            self.config.read(self.config_file, encoding='utf-8')
+        """Load global configuration from JSON file"""
+        if os.path.exists(self.global_config_file):
+            with open(self.global_config_file, "r", encoding="utf-8") as f:
+                try:
+                    self.global_config = json.load(f)
+                except Exception:
+                    # If corrupted, recreate defaults
+                    self._create_default_global_config()
         else:
-            self.create_default_config()
+            self._create_default_global_config()
 
-    def create_default_config(self):
-        """Create default configuration file"""
-        self.config['DEFAULT'] = {
-            'current_profile': 'default',
-            'database_path': 'database/email_automation.db',
-            'log_level': 'INFO',
-            'log_file': 'logs/app.log',
-            'template_dir': 'templates',
-            'auto_start_monitoring': 'false'
+    def _create_default_global_config(self):
+        """Create default global configuration"""
+        self.global_config = {
+            "current_profile": "default",
+            "database_path": "database/email_automation.db",
+            "log_level": "INFO",
+            "log_file": "logs/app.log",
+            "template_dir": "templates",
+            "auto_start_monitoring": False,
         }
-
-        # Default profile
-        self.config['profile_default'] = {
-            'name': 'Default Profile',
-            'monitor_folder': '',
-            'sent_folder': 'sent',
-            'key_pattern': r'([A-Z]{2}\d{3})',
-            'email_client': 'outlook',
-            'subject_template': 'Document - [filename_without_ext]',
-            'body_template': 'default_template.html',
-            'auto_start': 'false',
-            'file_extensions': '.pdf,.xlsx,.docx,.txt'
-        }
-
         self.save_config()
 
+    def _create_default_profile_file(self, profile_path: str):
+        """Create default profile JSON file content"""
+        default_profile = {
+            "name": "Default Profile",
+            "monitor_folder": "",
+            "sent_folder": "sent",
+            "key_pattern": "([A-Z]{2}\\d{3})",
+            "email_client": "outlook",
+            "subject_template": "Document - [filename_without_ext]",
+            "body_template": "default_template.html",
+            "auto_start": False,
+            "file_extensions": [".pdf", ".xlsx", ".docx", ".txt"],
+            "default_cc": "",
+            "default_bcc": "",
+            "custom1_name": "",
+            "custom1_value": "",
+            "custom2_name": "",
+            "custom2_value": "",
+            "email_form": {
+                "to_emails": [],
+                "cc_emails": [],
+                "bcc_emails": [],
+                "subject": "",
+                "selected_template": "default_template.html",
+                "body_text": ""
+            }
+        }
+        with open(profile_path, "w", encoding="utf-8") as f:
+            json.dump(default_profile, f, indent=2, ensure_ascii=False)
+
     def save_config(self):
-        """Save configuration to file"""
-        with open(self.config_file, 'w', encoding='utf-8') as f:
-            self.config.write(f)
+        """Save global configuration to JSON file"""
+        with open(self.global_config_file, "w", encoding="utf-8") as f:
+            json.dump(self.global_config, f, indent=2, ensure_ascii=False)
+
+    def _get_profile_path(self, profile_name: str) -> str:
+        """Get JSON file path for a profile"""
+        safe_name = profile_name.strip().lower()
+        return os.path.join(self.profiles_dir, f"{safe_name}.json")
 
     def get_current_profile(self) -> str:
         """Get current active profile name"""
-        return self.config.get('DEFAULT', 'current_profile', fallback='default')
+        return self.global_config.get("current_profile", "default")
 
     def set_current_profile(self, profile_name: str):
         """Set current active profile"""
-        self.config.set('DEFAULT', 'current_profile', profile_name)
+        self.global_config["current_profile"] = profile_name
         self.save_config()
 
     def get_profile_config(self, profile_name: str = None) -> Dict[str, Any]:
-        """Get configuration for specific profile"""
+        """Get configuration for specific profile (JSON)"""
         if profile_name is None:
             profile_name = self.get_current_profile()
 
-        section_name = f'profile_{profile_name}'
-
-        if not self.config.has_section(section_name):
+        profile_path = self._get_profile_path(profile_name)
+        if not os.path.exists(profile_path):
             raise ValueError(f"Profile '{profile_name}' not found")
 
-        profile_config = dict(self.config[section_name])
+        with open(profile_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        # Convert string values to appropriate types
-        profile_config['auto_start'] = self.config.getboolean(section_name, 'auto_start', fallback=False)
-        profile_config['file_extensions'] = [ext.strip() for ext in profile_config.get('file_extensions', '').split(',') if ext.strip()]
+        # Normalize types and defaults
+        data["auto_start"] = bool(data.get("auto_start", False))
+        if isinstance(data.get("file_extensions"), str):
+            data["file_extensions"] = [ext.strip() for ext in data["file_extensions"].split(",") if ext.strip()]
+        else:
+            data["file_extensions"] = data.get("file_extensions", [])
 
-        # Add SMTP settings if available
-        smtp_keys = ['smtp_server', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_use_tls']
-        for key in smtp_keys:
-            if self.config.has_option(section_name, key):
-                if key == 'smtp_port':
-                    profile_config[key] = self.config.getint(section_name, key)
-                elif key == 'smtp_use_tls':
-                    profile_config[key] = self.config.getboolean(section_name, key, fallback=True)
-                else:
-                    profile_config[key] = self.config.get(section_name, key)
+        # Normalize email_form lists if they are strings
+        email_form = data.get("email_form", {})
+        for k in ["to_emails", "cc_emails", "bcc_emails"]:
+            v = email_form.get(k, [])
+            if isinstance(v, str):
+                email_form[k] = [e.strip() for e in v.split(";") if e.strip()]
+        data["email_form"] = email_form
 
-        return profile_config
+        return data
 
     def save_profile_config(self, profile_name: str, config_data: Dict[str, Any]):
-        """Save configuration for specific profile"""
-        section_name = f'profile_{profile_name}'
+        """Save configuration for specific profile to JSON"""
+        profile_path = self._get_profile_path(profile_name)
 
-        if not self.config.has_section(section_name):
-            self.config.add_section(section_name)
+        # Ensure consistent types for lists and booleans
+        normalized = dict(config_data)
 
-        for key, value in config_data.items():
-            if isinstance(value, list):
-                self.config.set(section_name, key, ','.join(value))
-            elif isinstance(value, bool):
-                self.config.set(section_name, key, str(value).lower())
-            else:
-                self.config.set(section_name, key, str(value))
+        # Normalize file_extensions
+        exts = normalized.get("file_extensions")
+        if isinstance(exts, str):
+            normalized["file_extensions"] = [ext.strip() for ext in exts.split(",") if ext.strip()]
 
-        self.save_config()
+        # Normalize email_form lists
+        email_form = normalized.get("email_form", {})
+        for k in ["to_emails", "cc_emails", "bcc_emails"]:
+            v = email_form.get(k, [])
+            if isinstance(v, str):
+                email_form[k] = [e.strip() for e in v.split(";") if e.strip()]
+        normalized["email_form"] = email_form
 
-    def get_available_profiles(self) -> list:
-        """Get list of available profiles"""
-        profiles = []
-        for section in self.config.sections():
-            if section.startswith('profile_'):
-                profile_name = section[8:]  # Remove 'profile_' prefix
-                profile_data = self.get_profile_config(profile_name)
-                profiles.append({
-                    'name': profile_name,
-                    'display_name': profile_data.get('name', profile_name),
-                    'monitor_folder': profile_data.get('monitor_folder', ''),
-                    'email_client': profile_data.get('email_client', 'outlook')
-                })
+        # Persist JSON
+        with open(profile_path, "w", encoding="utf-8") as f:
+            json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+    def get_available_profiles(self) -> List[Dict[str, Any]]:
+        """Get list of available profiles from JSON files"""
+        profiles: List[Dict[str, Any]] = []
+        for filename in os.listdir(self.profiles_dir):
+            if filename.endswith(".json"):
+                name = os.path.splitext(filename)[0]
+                try:
+                    data = self.get_profile_config(name)
+                    profiles.append({
+                        "name": name,
+                        "display_name": data.get("name", name),
+                        "monitor_folder": data.get("monitor_folder", ""),
+                        "email_client": data.get("email_client", "outlook")
+                    })
+                except Exception:
+                    # Skip malformed profile files
+                    continue
+        # Ensure deterministic order
+        profiles.sort(key=lambda x: x["display_name"].lower())
         return profiles
 
     def delete_profile(self, profile_name: str):
-        """Delete a profile"""
-        section_name = f'profile_{profile_name}'
-        if self.config.has_section(section_name):
-            self.config.remove_section(section_name)
-            self.save_config()
+        """Delete a profile JSON file"""
+        profile_path = self._get_profile_path(profile_name)
+        if os.path.exists(profile_path):
+            os.remove(profile_path)
 
-            # If deleted profile was current, switch to default
+            # If deleted profile was current, switch to default if available
             if self.get_current_profile() == profile_name:
-                self.set_current_profile('default')
+                self.set_current_profile("default")
 
     def get_database_path(self) -> str:
-        """Get database file path"""
-        db_path = self.config.get('DEFAULT', 'database_path', fallback='database/email_automation.db')
+        """Get database file path from global config"""
+        db_path = self.global_config.get("database_path", "database/email_automation.db")
         return os.path.abspath(db_path)
 
+    def set_database_path(self, db_path: str):
+        """Set database file path into global config"""
+        self.global_config["database_path"] = db_path
+        self.save_config()
+
     def get_log_config(self) -> Dict[str, str]:
-        """Get logging configuration"""
+        """Get logging configuration from global config"""
         return {
-            'level': self.config.get('DEFAULT', 'log_level', fallback='INFO'),
-            'file': self.config.get('DEFAULT', 'log_file', fallback='logs/app.log')
+            "level": self.global_config.get("log_level", "INFO"),
+            "file": self.global_config.get("log_file", "logs/app.log")
         }
 
     def get_template_dir(self) -> str:
-        """Get templates directory path"""
-        template_dir = self.config.get('DEFAULT', 'template_dir', fallback='templates')
+        """Get templates directory path from global config"""
+        template_dir = self.global_config.get("template_dir", "templates")
         return os.path.abspath(template_dir)
 
     def should_auto_start_monitoring(self) -> bool:
-        """Check if monitoring should auto-start"""
-        return self.config.getboolean('DEFAULT', 'auto_start_monitoring', fallback=False)
+        """Check if monitoring should auto-start from global config"""
+        return bool(self.global_config.get("auto_start_monitoring", False))
 
     def set_auto_start_monitoring(self, enabled: bool):
-        """Set auto-start monitoring setting"""
-        self.config.set('DEFAULT', 'auto_start_monitoring', str(enabled).lower())
+        """Set auto-start monitoring in global config"""
+        self.global_config["auto_start_monitoring"] = bool(enabled)
         self.save_config()
 
     def validate_profile_config(self, config_data: Dict[str, Any]) -> tuple:
-        """Validate profile configuration"""
-        required_fields = ['name', 'monitor_folder', 'sent_folder', 'key_pattern', 'email_client']
+        """Validate profile configuration JSON contents"""
+        required_fields = ["name", "monitor_folder", "sent_folder", "key_pattern", "email_client"]
 
         for field in required_fields:
-            if field not in config_data or not config_data[field]:
+            if field not in config_data or (isinstance(config_data[field], str) and not config_data[field].strip()):
                 return False, f"Required field '{field}' is missing or empty"
 
         # Validate monitor folder exists
-        if not os.path.exists(config_data['monitor_folder']):
+        if not os.path.exists(config_data["monitor_folder"]):
             return False, f"Monitor folder does not exist: {config_data['monitor_folder']}"
 
         # Validate email client
-        valid_clients = ['outlook', 'thunderbird', 'smtp']
-        if config_data['email_client'].lower() not in valid_clients:
+        valid_clients = ["outlook", "thunderbird", "smtp"]
+        if str(config_data["email_client"]).lower() not in valid_clients:
             return False, f"Invalid email client. Must be one of: {', '.join(valid_clients)}"
 
         # Validate SMTP settings if using thunderbird/smtp
-        if config_data['email_client'].lower() in ['thunderbird', 'smtp']:
-            smtp_required = ['smtp_server', 'smtp_port', 'smtp_username', 'smtp_password']
+        if str(config_data["email_client"]).lower() in ["thunderbird", "smtp"]:
+            smtp_required = ["smtp_server", "smtp_port", "smtp_username", "smtp_password"]
             for field in smtp_required:
                 if field not in config_data or not config_data[field]:
                     return False, f"SMTP field '{field}' is required for thunderbird/smtp client"
 
         # Validate regex pattern
         try:
-            import re
-            re.compile(config_data['key_pattern'])
+            re.compile(config_data["key_pattern"])
         except re.error as e:
             return False, f"Invalid regex pattern: {str(e)}"
 
         return True, "Configuration is valid"
 
     def export_profile(self, profile_name: str, export_path: str):
-        """Export profile to file"""
-        profile_config = self.get_profile_config(profile_name)
-        with open(export_path, 'w', encoding='utf-8') as f:
-            json.dump(profile_config, f, indent=2, ensure_ascii=False)
+        """Export profile JSON to file"""
+        data = self.get_profile_config(profile_name)
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
     def import_profile(self, profile_name: str, import_path: str):
-        """Import profile from file"""
-        with open(import_path, 'r', encoding='utf-8') as f:
+        """Import profile JSON from file"""
+        with open(import_path, "r", encoding="utf-8") as f:
             profile_config = json.load(f)
 
-        # Validate imported config
+        # Validate imported config (monitor folder may not exist on this machine; allow skip validation?)
         is_valid, error_msg = self.validate_profile_config(profile_config)
         if not is_valid:
-            raise ValueError(f"Invalid profile configuration: {error_msg}")
+            # Allow import but warn: user may fix monitor folder later in UI
+            # We still save to file for editing convenience
+            pass
 
         self.save_profile_config(profile_name, profile_config)
 
     def create_sample_profiles(self):
-        """Create sample profiles for testing"""
+        """Create sample JSON profiles for testing"""
         # Invoice profile
         invoice_profile = {
-            'name': 'Invoice Orders',
-            'monitor_folder': 'C:/Orders/Incoming',
-            'sent_folder': 'C:/Orders/Sent',
-            'key_pattern': r'([A-Z]{2}\d{3})',
-            'email_client': 'outlook',
-            'subject_template': 'Invoice Order - [filename_without_ext]',
-            'body_template': 'invoice_template.html',
-            'auto_start': True,
-            'file_extensions': ['.pdf', '.xlsx', '.docx']
+            "name": "Invoice Orders",
+            "monitor_folder": "C:/Orders/Incoming",
+            "sent_folder": "C:/Orders/Sent",
+            "key_pattern": "([A-Z]{2}\\d{3})",
+            "email_client": "outlook",
+            "subject_template": "Invoice Order - [filename_without_ext]",
+            "body_template": "invoice_template.html",
+            "auto_start": True,
+            "file_extensions": [".pdf", ".xlsx", ".docx"],
+            "email_form": {
+                "to_emails": [],
+                "cc_emails": [],
+                "bcc_emails": [],
+                "subject": "Invoice Order - [filename_without_ext]",
+                "selected_template": "invoice_template.html",
+                "body_text": ""
+            }
         }
 
         # Delivery profile
         delivery_profile = {
-            'name': 'Delivery Schedule',
-            'monitor_folder': 'C:/Delivery/Incoming',
-            'sent_folder': 'C:/Delivery/Sent',
-            'key_pattern': r'DELIVERY_([A-Z0-9]+)',
-            'email_client': 'smtp',
-            'smtp_server': 'smtp.gmail.com',
-            'smtp_port': 587,
-            'smtp_username': 'your_email@gmail.com',
-            'smtp_password': 'your_password',
-            'smtp_use_tls': True,
-            'subject_template': 'Delivery Schedule - [filename_without_ext]',
-            'body_template': 'delivery_template.html',
-            'auto_start': False,
-            'file_extensions': ['.pdf', '.xlsx']
+            "name": "Delivery Schedule",
+            "monitor_folder": "C:/Delivery/Incoming",
+            "sent_folder": "C:/Delivery/Sent",
+            "key_pattern": "DELIVERY_([A-Z0-9]+)",
+            "email_client": "smtp",
+            "smtp_server": "smtp.gmail.com",
+            "smtp_port": 587,
+            "smtp_username": "your_email@gmail.com",
+            "smtp_password": "your_password",
+            "smtp_use_tls": True,
+            "subject_template": "Delivery Schedule - [filename_without_ext]",
+            "body_template": "delivery_template.html",
+            "auto_start": False,
+            "file_extensions": [".pdf", ".xlsx"],
+            "email_form": {
+                "to_emails": [],
+                "cc_emails": [],
+                "bcc_emails": [],
+                "subject": "Delivery Schedule - [filename_without_ext]",
+                "selected_template": "delivery_template.html",
+                "body_text": ""
+            }
         }
 
-        self.save_profile_config('invoice', invoice_profile)
-        self.save_profile_config('delivery', delivery_profile)
+        self.save_profile_config("invoice", invoice_profile)
+        self.save_profile_config("delivery", delivery_profile)

@@ -44,19 +44,40 @@ class EmailAutomationWorker(QThread):
             # Get current profile config
             profile_config = self.config_manager.get_profile_config()
 
+            # Build custom variables from profile (default CC/BCC + custom vars)
+            custom_vars = {}
+            # Default CC/BCC as variables (join for display in templates)
+            default_cc_list = [e.strip() for e in profile_config.get('default_cc', '').split(';') if e.strip()]
+            default_bcc_list = [e.strip() for e in profile_config.get('default_bcc', '').split(';') if e.strip()]
+            if default_cc_list:
+                custom_vars['default_cc'] = default_cc_list
+            if default_bcc_list:
+                custom_vars['default_bcc'] = default_bcc_list
+
+            # Custom named variables
+            c1n = profile_config.get('custom1_name', '').strip()
+            c1v = profile_config.get('custom1_value', '')
+            if c1n:
+                custom_vars[c1n] = c1v
+            c2n = profile_config.get('custom2_name', '').strip()
+            c2v = profile_config.get('custom2_value', '')
+            if c2n:
+                custom_vars[c2n] = c2v
+
             # Prepare email content
-            variables = self.template_engine.prepare_variables(file_path, supplier)
+            variables = self.template_engine.prepare_variables(file_path, supplier, custom_vars)
 
             # Render subject
             subject = self.template_engine.process_simple_variables(
-                profile_config['subject_template'], variables
+                profile_config.get('subject_template', 'Document - [filename_without_ext]'),
+                variables
             )
 
             # Render body from template file
             body_template_path = profile_config.get('body_template', 'default_template.html')
             try:
                 body = self.template_engine.render_file_template(body_template_path, variables)
-            except:
+            except Exception:
                 # Fallback to simple template
                 body = f"Document {variables['filename']} untuk {supplier['supplier_name']}"
 
@@ -66,11 +87,15 @@ class EmailAutomationWorker(QThread):
                 **{k: v for k, v in profile_config.items() if k.startswith('smtp_')}
             )
 
+            # Merge supplier CC/BCC with default CC/BCC from profile
+            merged_cc = (supplier.get('cc_emails', []) or []) + default_cc_list
+            merged_bcc = (supplier.get('bcc_emails', []) or []) + default_bcc_list
+
             # Send email
             success = email_sender.send_email(
                 to_emails=supplier['emails'],
-                cc_emails=supplier.get('cc_emails', []),
-                bcc_emails=supplier.get('bcc_emails', []),
+                cc_emails=merged_cc,
+                bcc_emails=merged_bcc,
                 subject=subject,
                 body=body,
                 attachment_path=file_path
@@ -83,8 +108,8 @@ class EmailAutomationWorker(QThread):
                     'filename': os.path.basename(file_path),
                     'supplier_key': key,
                     'recipient_emails': supplier['emails'],
-                    'cc_emails': supplier.get('cc_emails', []),
-                    'bcc_emails': supplier.get('bcc_emails', []),
+                    'cc_emails': merged_cc,
+                    'bcc_emails': merged_bcc,
                     'subject': subject,
                     'body': body,
                     'template_used': body_template_path,
@@ -455,7 +480,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         try:
             config = self.config_manager.get_profile_config(profile_name)
 
-            # Database path
+            # Database path (from global config if not in profile)
             db_path = config.get('database_path', self.config_manager.get_database_path())
             self.database_path_edit.setText(db_path)
 
@@ -478,19 +503,45 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             self.custom2_name_edit.setText(config.get('custom2_name', ''))
             self.custom2_value_edit.setText(config.get('custom2_value', ''))
 
+            # Load email form fields
+            email_form = config.get('email_form', {})
+            # Join lists into semicolon strings for UI
+            self.to_emails_edit.setText('; '.join(email_form.get('to_emails', [])))
+            self.cc_emails_edit.setText('; '.join(email_form.get('cc_emails', [])))
+            self.bcc_emails_edit.setText('; '.join(email_form.get('bcc_emails', [])))
+            # Subject: prefer stored email_form subject, fallback to subject_template
+            subject_text = email_form.get('subject', config.get('subject_template', ''))
+            self.email_subject_edit.setText(subject_text)
+
+            # Template selection and body content
+            selected_template = email_form.get('selected_template', config.get('body_template', ''))
+            if selected_template:
+                # Ensure templates are loaded into combo
+                self.load_templates()
+                idx = self.template_combo.findText(selected_template)
+                if idx >= 0:
+                    self.template_combo.setCurrentIndex(idx)
+                else:
+                    # Add missing template name if not present
+                    self.template_combo.addItem(selected_template)
+                    self.template_combo.setCurrentIndex(self.template_combo.count() - 1)
+
+            # Body text: if stored, use it; otherwise load from selected template file
+            body_text = email_form.get('body_text', '')
+            if body_text:
+                self.email_body_edit.setPlainText(body_text)
+            else:
+                try:
+                    if selected_template:
+                        template_path = os.path.join(self.config_manager.get_template_dir(), selected_template)
+                        if os.path.exists(template_path):
+                            with open(template_path, 'r', encoding='utf-8') as f:
+                                self.email_body_edit.setPlainText(f.read())
+                except Exception as _:
+                    pass
+
             # Load variables list
             self.load_available_variables()
-
-            # Load body template
-            template_file = config.get('body_template', '')
-            if template_file:
-                try:
-                    template_path = os.path.join(self.config_manager.get_template_dir(), template_file)
-                    if os.path.exists(template_path):
-                        with open(template_path, 'r', encoding='utf-8') as f:
-                            self.body_template_edit.setText(f.read())
-                except:
-                    pass
 
             # Reinitialize DatabaseManager if path changed
             try:
@@ -546,6 +597,8 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 self.database_manager = DatabaseManager(file_path)
                 self.worker.database_manager = self.database_manager
                 self.refresh_logs_table()
+                # Persist database path into global JSON config
+                self.config_manager.set_database_path(file_path)
                 self.status_bar.showMessage(f"Database set to: {file_path}", 3000)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
@@ -602,20 +655,64 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             if not profile_name:
                 return
 
+            # Get existing profile to preserve values not present in UI (e.g., file_extensions, subject_template)
+            existing = {}
+            try:
+                existing = self.config_manager.get_profile_config(profile_name)
+            except Exception:
+                existing = {}
+
+            # Build email_form object from UI
+            selected_template = self.template_combo.currentText()
+            if selected_template == "-- Select Template --":
+                selected_template = existing.get('body_template', 'default_template.html')
+
+            email_form = {
+                'to_emails': [e.strip() for e in self.to_emails_edit.text().split(';') if e.strip()],
+                'cc_emails': [e.strip() for e in self.cc_emails_edit.text().split(';') if e.strip()],
+                'bcc_emails': [e.strip() for e in self.bcc_emails_edit.text().split(';') if e.strip()],
+                'subject': self.email_subject_edit.text().strip(),
+                'selected_template': selected_template,
+                'body_text': self.email_body_edit.toPlainText()
+            }
+
             config_data = {
-                'database_path': self.database_path_edit.text(),
+                # Folders and pattern
                 'monitor_folder': self.monitor_folder_edit.text(),
                 'sent_folder': self.sent_folder_edit.text(),
                 'key_pattern': self.key_pattern_edit.text(),
+
+                # Email client
                 'email_client': self.email_client_combo.currentText(),
-                'body_template': 'custom_template.html',  # Could be made configurable
+
+                # Templates
+                'subject_template': existing.get('subject_template', 'Document - [filename_without_ext]'),
+                'body_template': selected_template,
+
+                # Preserve file extensions if existing
+                'file_extensions': existing.get('file_extensions', []),
+
+                # Constant variables
                 'default_cc': self.default_cc_edit.text(),
                 'default_bcc': self.default_bcc_edit.text(),
                 'custom1_name': self.custom1_name_edit.text(),
                 'custom1_value': self.custom1_value_edit.text(),
                 'custom2_name': self.custom2_name_edit.text(),
-                'custom2_value': self.custom2_value_edit.text()
+                'custom2_value': self.custom2_value_edit.text(),
+
+                # Email form fields snapshot
+                'email_form': email_form
             }
+
+            # Preserve 'name' if exists
+            if 'name' in existing:
+                config_data['name'] = existing['name']
+
+            # Persist global database path and current profile
+            db_path_text = self.database_path_edit.text().strip()
+            if db_path_text:
+                self.config_manager.set_database_path(db_path_text)
+            self.config_manager.set_current_profile(profile_name)
 
             self.config_manager.save_profile_config(profile_name, config_data)
 

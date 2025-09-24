@@ -445,6 +445,57 @@ Variabel umum yang tersedia (lihat [def prepare_variables()](src/core/template_e
 - Konten template akan dimuat ke editor “Body”
 - Klik “Generate Preview” untuk melihat hasil rendering gabungan variabel sederhana (subject/body) dengan sample data
 
+### 7.3. Panduan Penggunaan Variabel di Email Form
+
+Bagian Email Form mendukung placeholder variabel sederhana dengan format [variable_name] pada field Subject dan Body. Evaluasi placeholder dilakukan oleh fungsi [def process_simple_variables()](src/core/template_engine.py:79).
+
+- Cara memasukkan variabel dari UI:
+  - Buka tab “Variables”
+  - Pilih variabel dari daftar “Available Variables”
+  - Klik “Insert to Subject” atau “Insert to Body”
+  - Tombol tersebut memanggil [def insert_variable_to_subject()](src/ui/main_window.py:882) dan [def insert_variable_to_body()](src/ui/main_window.py:896)
+
+- Aturan penulisan variabel sederhana:
+  - Format: [nama_variabel] (huruf/angka/underscore saja — sesuai pola \w+)
+  - Jika variabel tidak ditemukan saat proses, teks akan dibiarkan apa adanya, misal [unknown_var]
+  - Jika nilai variabel berupa list (contoh: emails, cc_emails, bcc_emails), akan digabung menjadi string dipisah koma dan spasi, contoh: "a@b.com, c@d.com"
+  - Variabel yang tersedia untuk placeholder sederhana merujuk pada data yang disiapkan oleh [def prepare_variables()](src/core/template_engine.py:33), antara lain:
+    - File: [filename], [filename_without_ext], [filepath], [file_size], [file_size_mb]
+    - Supplier: [supplier_code], [supplier_name], [contact_name], [emails], [cc_emails], [bcc_emails]
+    - Waktu: [date], [time], [datetime], [date_indonesian], [day], [month], [year], [month_name], [day_name]
+    - Sistem: [current_user], [computer_name]
+  - Variabel custom dari panel “Constant Variables”:
+    - Isi “Custom Variable 1/2” (name dan value). Selama “name” hanya berisi huruf/angka/underscore, Anda dapat memakainya sebagai [name] di Subject/Body
+    - Catatan: variabel custom ini digunakan dalam Preview. Alur otomatis menggunakan konfigurasi profil dan data supplier
+
+- Perilaku di Preview vs. Kirim Email:
+  - Preview:
+    - Tombol “Generate Preview” akan mengganti placeholder [var] pada Subject/Body menggunakan [def generate_preview()](src/ui/main_window.py:907)
+  - Send Test Email (Manual):
+    - Tombol “Send Test Email” mengirim apa yang tertulis di Subject/Body tanpa penggantian placeholder [def send_test_email()](src/ui/main_window.py:757)
+  - Alur Otomatis (Monitoring):
+    - Subject diambil dari profile (subject_template) dan diproses dengan placeholder sederhana oleh [def process_file()](src/ui/main_window.py:35)
+    - Body di-render dari file template (Jinja2) melalui [def render_file_template()](src/core/template_engine.py:25), bukan placeholder [var]
+
+- Menggabungkan dengan Jinja2:
+  - Di file template HTML (mis. default_template.html), gunakan sintaks Jinja2 seperti {{ supplier_name }} untuk body otomatis
+  - Placeholder [var] cocok untuk Subject dan editor Body di Email Form saat Preview. Untuk file template .html, gunakan Jinja2, bukan [var]
+
+- Tips dan catatan:
+  - Menampilkan tanda kurung siku literal:
+    - Placeholder dikenali hanya jika berisi huruf/angka/underscore. Untuk menampilkan teks “[filename]” secara literal, sisipkan karakter non-word, misalnya “[file name]” atau “[file-name]”
+  - Hindari tanda kurung ganda bersarang, seperti [[filename]], karena tidak didukung dan dapat menghasilkan sisa karakter bracket
+  - Nama variabel custom hanya boleh berisi huruf/angka/underscore. Tanda hubung (dash) tidak cocok untuk placeholder sederhana
+  - Gunakan daftar “Available Variables” untuk mengurangi salah ketik saat memasukkan placeholder
+
+- Contoh penggunaan:
+  - Subject:
+    - “Invoice - [filename_without_ext] untuk [supplier_name]”
+  - Body (Email Form editor):
+    - “Dear [contact_name], mohon review lampiran [filename] untuk supplier [supplier_code].”
+  - Body (Template HTML Jinja2):
+    - “Dear {{ contact_name }}, mohon review lampiran {{ filename }} untuk supplier {{ supplier_code }}.”
+
 ## 8. Monitoring Folder dan Alur Otomasi
 
 Monitoring dikendalikan oleh [class FolderMonitor](src/core/folder_monitor.py:47):
