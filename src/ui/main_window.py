@@ -190,6 +190,9 @@ class MainWindow(FluentWindow):
         self.status_interface = self.create_status_interface()
         self.status_interface.setObjectName('StatusInterface')
         
+        self.about_interface = self.create_about_interface()
+        self.about_interface.setObjectName('AboutInterface')
+        
         # Add navigation items
         self.addSubInterface(
             self.config_interface,
@@ -210,6 +213,13 @@ class MainWindow(FluentWindow):
             FluentIcon.INFO,
             'Status & Logs',
             NavigationItemPosition.TOP
+        )
+        
+        self.addSubInterface(
+            self.about_interface,
+            FluentIcon.HELP,
+            'About',
+            NavigationItemPosition.BOTTOM
         )
 
         # Load current configuration
@@ -486,19 +496,15 @@ class MainWindow(FluentWindow):
 
     def create_template_interface(self):
         """Create template interface with Fluent Design"""
-        widget = ScrollArea()
-        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        widget.setWidgetResizable(True)
-        
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setSpacing(24)
+        layout.setSpacing(20)
         layout.setContentsMargins(32, 32, 32, 32)
 
         # Title
         title_label = TitleLabel("Email Templates & Composition")
         layout.addWidget(title_label)
-        layout.addSpacing(16)
+        layout.addSpacing(8)
 
         # Pivot for different sections
         pivot = Pivot()
@@ -518,41 +524,52 @@ class MainWindow(FluentWindow):
             onClick=lambda: self.stackedWidget_template.setCurrentIndex(2)
         )
         layout.addWidget(pivot)
-        layout.addSpacing(16)
+        layout.addSpacing(12)
 
         # Create stacked widget for pivot content
         from PySide6.QtWidgets import QStackedWidget
         self.stackedWidget_template = QStackedWidget()
         
-        # Email Form Content
+        # Email Form Content - wrapped in ScrollArea
+        email_form_scroll = ScrollArea()
+        email_form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        email_form_scroll.setWidgetResizable(True)
         email_form_widget = self.create_email_form_content()
-        self.stackedWidget_template.addWidget(email_form_widget)
+        email_form_scroll.setWidget(email_form_widget)
+        self.stackedWidget_template.addWidget(email_form_scroll)
         
-        # Variables Content
+        # Variables Content - wrapped in ScrollArea
+        variables_scroll = ScrollArea()
+        variables_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        variables_scroll.setWidgetResizable(True)
         variables_widget = self.create_variables_content()
-        self.stackedWidget_template.addWidget(variables_widget)
+        variables_scroll.setWidget(variables_widget)
+        self.stackedWidget_template.addWidget(variables_scroll)
         
-        # Preview Content
+        # Preview Content - wrapped in ScrollArea
+        preview_scroll = ScrollArea()
+        preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        preview_scroll.setWidgetResizable(True)
         preview_widget = self.create_preview_content()
-        self.stackedWidget_template.addWidget(preview_widget)
+        preview_scroll.setWidget(preview_widget)
+        self.stackedWidget_template.addWidget(preview_scroll)
         
-        layout.addWidget(self.stackedWidget_template)
+        layout.addWidget(self.stackedWidget_template, 1)  # Give it stretch factor
 
-        widget.setWidget(content_widget)
-        return widget
+        return content_widget
 
     def create_email_form_content(self):
         """Create email form content with fluent cards"""
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setSpacing(20)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(0, 0, 0, 24)
 
         # Recipients Card
         recipients_card = GroupHeaderCardWidget("Email Recipients")
         recipients_layout = QVBoxLayout()
         recipients_layout.setSpacing(12)
-        recipients_layout.setContentsMargins(20, 20, 20, 20)
+        recipients_layout.setContentsMargins(24, 24, 24, 24)
 
         # To field
         to_row = QHBoxLayout()
@@ -592,7 +609,7 @@ class MainWindow(FluentWindow):
         content_card = GroupHeaderCardWidget("Email Content")
         content_layout = QVBoxLayout()
         content_layout.setSpacing(12)
-        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setContentsMargins(24, 24, 24, 24)
 
         # Subject field
         subject_row = QHBoxLayout()
@@ -610,10 +627,15 @@ class MainWindow(FluentWindow):
         template_row.addWidget(StrongBodyLabel("Template:"))
         template_row.addStretch()
         content_layout.addLayout(template_row)
+        
+        template_input_row = QHBoxLayout()
+        template_input_row.setSpacing(12)
         self.template_combo = ComboBox()
-        self.template_combo.setMinimumWidth(200)
+        self.template_combo.setMinimumWidth(300)
         self.load_templates()
-        content_layout.addWidget(self.template_combo)
+        template_input_row.addWidget(self.template_combo)
+        template_input_row.addStretch()
+        content_layout.addLayout(template_input_row)
         
         content_layout.addSpacing(8)
 
@@ -623,7 +645,7 @@ class MainWindow(FluentWindow):
         body_row.addStretch()
         content_layout.addLayout(body_row)
         self.email_body_edit = TextEdit()
-        self.email_body_edit.setMinimumHeight(250)
+        self.email_body_edit.setMinimumHeight(300)
         content_layout.addWidget(self.email_body_edit)
 
         content_card.viewLayout.addLayout(content_layout)
@@ -636,15 +658,16 @@ class MainWindow(FluentWindow):
         actions_layout.setSpacing(12)
         
         self.save_template_btn = PushButton(FluentIcon.SAVE, "Save Template")
-        self.save_template_btn.setMinimumHeight(36)
+        self.save_template_btn.setMinimumHeight(40)
+        self.save_template_btn.setMinimumWidth(140)
         self.send_test_email_btn = PrimaryPushButton(FluentIcon.SEND, "Send Test Email")
-        self.send_test_email_btn.setMinimumHeight(36)
+        self.send_test_email_btn.setMinimumHeight(40)
+        self.send_test_email_btn.setMinimumWidth(160)
         actions_layout.addWidget(self.save_template_btn)
         actions_layout.addWidget(self.send_test_email_btn)
         actions_layout.addStretch()
 
         layout.addWidget(actions_card)
-        layout.addStretch()
 
         return content
 
@@ -653,25 +676,27 @@ class MainWindow(FluentWindow):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setSpacing(20)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(0, 0, 0, 24)
 
         # Available Variables Card
         variables_card = GroupHeaderCardWidget("Available Variables")
         variables_layout = QVBoxLayout()
-        variables_layout.setSpacing(12)
-        variables_layout.setContentsMargins(20, 20, 20, 20)
+        variables_layout.setSpacing(16)
+        variables_layout.setContentsMargins(24, 24, 24, 24)
 
         self.variables_list = ListWidget()
-        self.variables_list.setMinimumHeight(200)
+        self.variables_list.setMinimumHeight(220)
         variables_layout.addWidget(self.variables_list)
 
         # Variable insertion buttons
         var_buttons_layout = QHBoxLayout()
         var_buttons_layout.setSpacing(12)
         self.insert_var_btn = PushButton(FluentIcon.ADD, "Insert to Subject")
-        self.insert_var_btn.setMinimumHeight(36)
+        self.insert_var_btn.setMinimumHeight(40)
+        self.insert_var_btn.setMinimumWidth(140)
         self.insert_var_body_btn = PushButton(FluentIcon.ADD, "Insert to Body")
-        self.insert_var_body_btn.setMinimumHeight(36)
+        self.insert_var_body_btn.setMinimumHeight(40)
+        self.insert_var_body_btn.setMinimumWidth(140)
         var_buttons_layout.addWidget(self.insert_var_btn)
         var_buttons_layout.addWidget(self.insert_var_body_btn)
         var_buttons_layout.addStretch()
@@ -683,13 +708,13 @@ class MainWindow(FluentWindow):
         # Sample Data Card
         sample_card = GroupHeaderCardWidget("Sample Data Preview")
         sample_layout = QVBoxLayout()
-        sample_layout.setSpacing(12)
-        sample_layout.setContentsMargins(20, 20, 20, 20)
+        sample_layout.setSpacing(16)
+        sample_layout.setContentsMargins(24, 24, 24, 24)
 
         self.sample_data_text = TextEdit()
         self.sample_data_text.setReadOnly(True)
-        self.sample_data_text.setMinimumHeight(180)
-        self.sample_data_text.setMaximumHeight(220)
+        self.sample_data_text.setMinimumHeight(200)
+        self.sample_data_text.setMaximumHeight(250)
         sample_layout.addWidget(self.sample_data_text)
         
         # Load variables after sample_data_text is initialized
@@ -697,7 +722,6 @@ class MainWindow(FluentWindow):
 
         sample_card.viewLayout.addLayout(sample_layout)
         layout.addWidget(sample_card)
-        layout.addStretch()
 
         return content
 
@@ -706,27 +730,32 @@ class MainWindow(FluentWindow):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setSpacing(20)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(0, 0, 0, 24)
 
         # Preview Card
         preview_card = GroupHeaderCardWidget("Email Preview")
         preview_layout = QVBoxLayout()
         preview_layout.setSpacing(16)
-        preview_layout.setContentsMargins(20, 20, 20, 20)
+        preview_layout.setContentsMargins(24, 24, 24, 24)
 
-        self.preview_text = TextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setMinimumHeight(350)
-        preview_layout.addWidget(self.preview_text)
-
+        # Preview button at top
+        button_row = QHBoxLayout()
         self.preview_btn = PrimaryPushButton(FluentIcon.VIEW, "Generate Preview")
         self.preview_btn.setMinimumHeight(40)
         self.preview_btn.setMinimumWidth(180)
-        preview_layout.addWidget(self.preview_btn)
+        button_row.addWidget(self.preview_btn)
+        button_row.addStretch()
+        preview_layout.addLayout(button_row)
+        
+        preview_layout.addSpacing(8)
+
+        self.preview_text = TextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setMinimumHeight(400)
+        preview_layout.addWidget(self.preview_text)
 
         preview_card.viewLayout.addLayout(preview_layout)
         layout.addWidget(preview_card)
-        layout.addStretch()
 
         return content
 
@@ -810,6 +839,185 @@ class MainWindow(FluentWindow):
         layout.addWidget(logs_card)
 
         layout.addSpacing(24)
+        widget.setWidget(content_widget)
+        return widget
+
+    def create_about_interface(self):
+        """Create about interface with usage guide and developer info"""
+        widget = ScrollArea()
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        widget.setWidgetResizable(True)
+        
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(24)
+        layout.setContentsMargins(32, 32, 32, 32)
+
+        # Title
+        title_label = TitleLabel("About Email Automation Desktop")
+        layout.addWidget(title_label)
+        layout.addSpacing(16)
+
+        # Application Info Card
+        app_info_card = GroupHeaderCardWidget("Application Information")
+        app_info_layout = QVBoxLayout()
+        app_info_layout.setSpacing(12)
+        app_info_layout.setContentsMargins(20, 20, 20, 20)
+
+        app_info_text = BodyLabel(
+            "Email Automation Desktop v1.0.0\n"
+            "Automated email sending based on file monitoring\n"
+            "Built with PySide6 and PyQt-Fluent-Widgets"
+        )
+        app_info_layout.addWidget(app_info_text)
+
+        app_info_card.viewLayout.addLayout(app_info_layout)
+        layout.addWidget(app_info_card)
+
+        # Quick Usage Guide Card
+        usage_card = GroupHeaderCardWidget("Quick Usage Guide")
+        usage_layout = QVBoxLayout()
+        usage_layout.setSpacing(16)
+        usage_layout.setContentsMargins(20, 20, 20, 20)
+
+        usage_steps = [
+            "1. Configure Database & Templates",
+            "   • Set database file path (suppliers data)",
+            "   • Set template folder for email templates",
+            "",
+            "2. Setup Monitoring",
+            "   • Choose folder to monitor for new files",
+            "   • Set sent folder for processed files",
+            "   • Define key pattern (regex) to extract supplier codes",
+            "   • Select file extensions to monitor (.pdf, .xlsx, etc.)",
+            "",
+            "3. Configure Email Settings",
+            "   • Choose email client (Outlook/Thunderbird/SMTP)",
+            "   • Set default CC/BCC emails if needed",
+            "   • Add custom variables for templates",
+            "",
+            "4. Design Email Templates",
+            "   • Create email templates with variables",
+            "   • Use Variables tab to see available placeholders",
+            "   • Preview emails before sending",
+            "",
+            "5. Start Monitoring",
+            "   • Click 'Start Monitoring' button",
+            "   • Application will automatically process new files",
+            "   • Check Status & Logs for monitoring activity",
+            "",
+            "6. Monitor Results",
+            "   • View recent processed files",
+            "   • Check email logs for sent emails",
+            "   • Monitor processing status"
+        ]
+
+        usage_text = BodyLabel('\n'.join(usage_steps))
+        usage_text.setWordWrap(True)
+        usage_layout.addWidget(usage_text)
+
+        usage_card.viewLayout.addLayout(usage_layout)
+        layout.addWidget(usage_card)
+
+        # Variable Examples Card
+        variables_card = GroupHeaderCardWidget("Template Variables Examples")
+        variables_layout = QVBoxLayout()
+        variables_layout.setSpacing(12)
+        variables_layout.setContentsMargins(20, 20, 20, 20)
+
+        variables_examples = [
+            "System Variables:",
+            "• [filename] - Full filename with extension",
+            "• [filename_without_ext] - Filename without extension",
+            "• [filepath] - Complete file path",
+            "• [date] - Current date",
+            "• [time] - Current time",
+            "",
+            "Supplier Variables (from database):",
+            "• [supplier_code] - Supplier identification code",
+            "• [supplier_name] - Company/supplier name",
+            "• [contact_name] - Contact person name",
+            "• [emails] - Primary email addresses",
+            "",
+            "Example Usage in Templates:",
+            'Subject: "Invoice [filename_without_ext] for [supplier_name]"',
+            'Body: "Dear [contact_name], please find attached [filename]..."'
+        ]
+
+        variables_text = BodyLabel('\n'.join(variables_examples))
+        variables_text.setWordWrap(True)
+        variables_layout.addWidget(variables_text)
+
+        variables_card.viewLayout.addLayout(variables_layout)
+        layout.addWidget(variables_card)
+
+        # Troubleshooting Card
+        troubleshooting_card = GroupHeaderCardWidget("Troubleshooting Tips")
+        troubleshooting_layout = QVBoxLayout()
+        troubleshooting_layout.setSpacing(12)
+        troubleshooting_layout.setContentsMargins(20, 20, 20, 20)
+
+        troubleshooting_tips = [
+            "Common Issues & Solutions:",
+            "",
+            "• Files not being processed:",
+            "  - Check monitor folder path exists",
+            "  - Verify key pattern regex is correct",
+            "  - Ensure file extensions are selected",
+            "  - Check supplier exists in database for extracted key",
+            "",
+            "• Emails not sending:",
+            "  - Verify email client is configured properly",
+            "  - Check internet connection",
+            "  - Ensure Outlook is running (for Outlook client)",
+            "  - Verify SMTP settings (for Thunderbird/SMTP)",
+            "",
+            "• Template variables not working:",
+            "  - Use correct variable syntax: [variable_name]",
+            "  - Check Variables tab for available options",
+            "  - Ensure supplier data exists in database",
+            "",
+            "• Performance issues:",
+            "  - Limit file extensions to necessary types only",
+            "  - Keep monitoring folder organized",
+            "  - Regular database maintenance"
+        ]
+
+        troubleshooting_text = BodyLabel('\n'.join(troubleshooting_tips))
+        troubleshooting_text.setWordWrap(True)
+        troubleshooting_layout.addWidget(troubleshooting_text)
+
+        troubleshooting_card.viewLayout.addLayout(troubleshooting_layout)
+        layout.addWidget(troubleshooting_card)
+
+        # Developer Credit Card
+        credit_card = SimpleCardWidget()
+        credit_layout = QVBoxLayout(credit_card)
+        credit_layout.setContentsMargins(24, 20, 24, 20)
+        credit_layout.setSpacing(8)
+
+        # Center the developer info
+        credit_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        developed_label = StrongBodyLabel("Developed by")
+        developed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_layout.addWidget(developed_label)
+        
+        developer_label = TitleLabel("Faizal Kusmawan")
+        developer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        developer_label.setStyleSheet("color: #0078d4; font-weight: bold;")
+        credit_layout.addWidget(developer_label)
+        
+        # Add some spacing
+        credit_layout.addSpacing(8)
+        
+        version_label = CaptionLabel("Email Automation Desktop v1.0.0")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_layout.addWidget(version_label)
+
+        layout.addWidget(credit_card)
+        layout.addSpacing(24)
+
         widget.setWidget(content_widget)
         return widget
 
