@@ -839,9 +839,51 @@ class MainWindow(FluentWindow):
         logs_layout.setContentsMargins(20, 20, 20, 20)
 
         self.logs_table = TableWidget()
-        self.logs_table.setColumnCount(4)
-        self.logs_table.setHorizontalHeaderLabels(["Time", "File", "Supplier", "Status"])
-        self.logs_table.setMinimumHeight(320)
+        self.logs_table.setColumnCount(7)
+        self.logs_table.setHorizontalHeaderLabels([
+            "Time", "File", "Supplier", "Subject", "Recipients", "Email Client", "Status"
+        ])
+
+        # Set column widths for better visibility
+        self.logs_table.setColumnWidth(0, 140)  # Time - wider for full timestamp
+        self.logs_table.setColumnWidth(1, 200)  # File - wider for full filename
+        self.logs_table.setColumnWidth(2, 120)  # Supplier - for supplier info
+        self.logs_table.setColumnWidth(3, 250)  # Subject - for email subject
+        self.logs_table.setColumnWidth(4, 200)  # Recipients - for email addresses
+        self.logs_table.setColumnWidth(5, 100)  # Email Client - for client type
+        self.logs_table.setColumnWidth(6, 80)   # Status - for status info
+
+        # Make columns resizable
+        header = self.logs_table.horizontalHeader()
+        header.setStretchLastSection(False)  # Don't stretch last column
+        header.setSectionResizeMode(0, header.ResizeMode.Fixed)      # Time
+        header.setSectionResizeMode(1, header.ResizeMode.Interactive) # File
+        header.setSectionResizeMode(2, header.ResizeMode.Interactive) # Supplier
+        header.setSectionResizeMode(3, header.ResizeMode.Interactive) # Subject
+        header.setSectionResizeMode(4, header.ResizeMode.Interactive) # Recipients
+        header.setSectionResizeMode(5, header.ResizeMode.Fixed)       # Email Client
+        header.setSectionResizeMode(6, header.ResizeMode.Fixed)       # Status
+
+        # Enable text wrapping for long content
+        self.logs_table.setWordWrap(True)
+        self.logs_table.setTextElideMode(Qt.TextElideMode.ElideNone)
+
+        # Set minimum height for better visibility
+        self.logs_table.setMinimumHeight(400)
+        self.logs_table.setMaximumHeight(600)
+
+        # Enable horizontal scrolling if needed
+        self.logs_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.logs_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Enable sorting
+        self.logs_table.setSortingEnabled(True)
+        self.logs_table.sortByColumn(0, Qt.SortOrder.DescendingOrder)  # Sort by time descending
+
+        # Set selection behavior
+        self.logs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.logs_table.setAlternatingRowColors(True)
+
         logs_layout.addWidget(self.logs_table)
 
         logs_card.viewLayout.addLayout(logs_layout)
@@ -1553,16 +1595,132 @@ class MainWindow(FluentWindow):
         QMessageBox.warning(self, "Processing Error", error_message)
 
     def refresh_logs_table(self):
-        """Refresh email logs table"""
+        """Refresh email logs table with enhanced visibility"""
         try:
-            logs = self.database_manager.get_email_logs(limit=50)
+            logs = self.database_manager.get_email_logs(limit=100)
             self.logs_table.setRowCount(len(logs))
 
             for row, log in enumerate(logs):
-                self.logs_table.setItem(row, 0, QTableWidgetItem(log.get('sent_at', '')))
-                self.logs_table.setItem(row, 1, QTableWidgetItem(log.get('filename', '')))
-                self.logs_table.setItem(row, 2, QTableWidgetItem(log.get('supplier_key', '')))
-                self.logs_table.setItem(row, 3, QTableWidgetItem(log.get('status', '')))
+                # Time column - format timestamp for better readability
+                sent_at = log.get('sent_at', '')
+                if sent_at:
+                    # Try to format the timestamp if it's in ISO format
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
+                        formatted_time = dt.strftime('%Y-%m-%d\n%H:%M:%S')
+                    except:
+                        formatted_time = sent_at
+                else:
+                    formatted_time = ''
+                self.logs_table.setItem(row, 0, QTableWidgetItem(formatted_time))
+
+                # File column - show full filename
+                filename = log.get('filename', '')
+                # Show full filename, add tooltip with full path if available
+                file_path = log.get('file_path', '')
+                filename_item = QTableWidgetItem(filename)
+                if file_path and file_path != filename:
+                    filename_item.setToolTip(f"Full path: {file_path}")
+                self.logs_table.setItem(row, 1, filename_item)
+
+                # Supplier column - show both key and name
+                supplier_key = log.get('supplier_key', '')
+                supplier_info = supplier_key
+
+                # Try to get supplier name from database
+                try:
+                    supplier = self.database_manager.get_supplier_by_key(supplier_key)
+                    if supplier:
+                        supplier_name = supplier.get('supplier_name', '')
+                        if supplier_name and supplier_name != supplier_key:
+                            supplier_info = f"{supplier_key}\n{supplier_name}"
+                except:
+                    pass  # Keep original supplier_key if lookup fails
+
+                supplier_item = QTableWidgetItem(supplier_info)
+                # Add tooltip with additional supplier information
+                try:
+                    supplier = self.database_manager.get_supplier_by_key(supplier_key)
+                    if supplier:
+                        contact_name = supplier.get('contact_name', '')
+                        emails = supplier.get('emails', [])
+                        cc_emails = supplier.get('cc_emails', [])
+                        bcc_emails = supplier.get('bcc_emails', [])
+
+                        tooltip_parts = []
+                        if contact_name:
+                            tooltip_parts.append(f"Contact: {contact_name}")
+                        if emails:
+                            tooltip_parts.append(f"Emails: {', '.join(emails)}")
+                        if cc_emails:
+                            tooltip_parts.append(f"CC: {', '.join(cc_emails)}")
+                        if bcc_emails:
+                            tooltip_parts.append(f"BCC: {', '.join(bcc_emails)}")
+
+                        if tooltip_parts:
+                            supplier_item.setToolTip('\n'.join(tooltip_parts))
+                except:
+                    pass  # Keep simple tooltip if lookup fails
+
+                self.logs_table.setItem(row, 2, supplier_item)
+
+                # Subject column - show email subject
+                subject = log.get('subject', '')
+                # Truncate very long subjects for display
+                display_subject = subject
+                if len(subject) > 60:
+                    display_subject = subject[:57] + "..."
+
+                subject_item = QTableWidgetItem(display_subject)
+                # Add full subject as tooltip if truncated
+                if len(subject) > 60:
+                    subject_item.setToolTip(subject)
+                self.logs_table.setItem(row, 3, subject_item)
+
+                # Recipients column - show recipient emails
+                recipient_emails = log.get('recipient_emails', '[]')
+                try:
+                    emails = json.loads(recipient_emails) if recipient_emails else []
+                    if emails:
+                        recipients_text = '\n'.join(emails[:3])  # Show first 3 emails
+                        if len(emails) > 3:
+                            recipients_text += f"\n... (+{len(emails) - 3} more)"
+
+                        # Add full list as tooltip
+                        full_recipients = '\n'.join(emails)
+                        recipients_item = QTableWidgetItem(recipients_text)
+                        recipients_item.setToolTip(f"All recipients:\n{full_recipients}")
+                    else:
+                        recipients_text = 'No recipients'
+                        recipients_item = QTableWidgetItem(recipients_text)
+                except:
+                    recipients_text = 'Invalid data'
+                    recipients_item = QTableWidgetItem(recipients_text)
+
+                self.logs_table.setItem(row, 4, recipients_item)
+
+                # Email Client column
+                email_client = log.get('email_client', '')
+                client_item = QTableWidgetItem(email_client)
+                self.logs_table.setItem(row, 5, client_item)
+
+                # Status column - enhanced status display
+                status = log.get('status', 'sent')
+                status_item = QTableWidgetItem(status.upper())
+
+                # Color code status
+                if status.lower() == 'sent':
+                    status_item.setBackground(Qt.GlobalColor.green)
+                    status_item.setForeground(Qt.GlobalColor.white)
+                elif status.lower() == 'failed':
+                    status_item.setBackground(Qt.GlobalColor.red)
+                    status_item.setForeground(Qt.GlobalColor.white)
+                elif status.lower() == 'pending':
+                    status_item.setBackground(Qt.GlobalColor.yellow)
+                    status_item.setForeground(Qt.GlobalColor.black)
+
+                self.logs_table.setItem(row, 6, status_item)
 
         except Exception as e:
             self.logger.error(f"Failed to refresh logs table: {str(e)}")
