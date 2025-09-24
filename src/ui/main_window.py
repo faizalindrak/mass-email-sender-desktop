@@ -357,9 +357,11 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.email_body_edit = QTextEdit()
         email_form_layout.addWidget(self.email_body_edit)
 
-        # Send email button
+        # Template save and send buttons
         send_button_layout = QHBoxLayout()
+        self.save_template_btn = QPushButton("Save Template File")
         self.send_test_email_btn = QPushButton("Send Test Email")
+        send_button_layout.addWidget(self.save_template_btn)
         send_button_layout.addWidget(self.send_test_email_btn)
         send_button_layout.addStretch()
         email_form_layout.addLayout(send_button_layout)
@@ -453,6 +455,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
         self.browse_database_btn.clicked.connect(self.browse_database_file)
         self.browse_template_btn.clicked.connect(self.browse_template_folder)
+        self.save_template_btn.clicked.connect(self.save_template_file)
         self.preview_btn.clicked.connect(self.generate_preview)
         self.load_profile_btn.clicked.connect(self.load_profile_from_file)
         self.save_profile_btn.clicked.connect(self.save_profile_to_file)
@@ -542,19 +545,18 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                     self.template_combo.addItem(selected_template)
                     self.template_combo.setCurrentIndex(self.template_combo.count() - 1)
 
-            # Body text: if stored, use it; otherwise load from selected template file
-            body_text = email_form.get('body_text', '')
-            if body_text:
-                self.email_body_edit.setPlainText(body_text)
-            else:
-                try:
-                    if selected_template:
-                        template_path = os.path.join(self.config_manager.get_template_dir(), selected_template)
-                        if os.path.exists(template_path):
-                            with open(template_path, 'r', encoding='utf-8') as f:
-                                self.email_body_edit.setPlainText(f.read())
-                except Exception as _:
-                    pass
+            # Load body from selected template file (do not persist content in configuration)
+            try:
+                if selected_template:
+                    template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+                    template_path = os.path.join(template_dir, selected_template)
+                    if os.path.exists(template_path):
+                        with open(template_path, 'r', encoding='utf-8') as f:
+                            self.email_body_edit.setPlainText(f.read())
+                    else:
+                        self.email_body_edit.setPlainText("")
+            except Exception as _:
+                pass
 
             # Load variables list
             self.load_available_variables()
@@ -638,6 +640,26 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to set template folder: {str(e)}")
 
+    def save_template_file(self):
+        """Save current body editor content to the selected template file in the chosen folder"""
+        template_name = self.template_combo.currentText()
+        if template_name == "-- Select Template --" or not template_name:
+            QMessageBox.warning(self, "Warning", "Please select a template to save")
+            return
+
+        template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+        template_path = os.path.join(template_dir, template_name)
+
+        try:
+            os.makedirs(template_dir, exist_ok=True)
+            content = self.email_body_edit.toPlainText()
+            with open(template_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.status_bar.showMessage(f"Template saved: {template_path}", 3000)
+            QMessageBox.information(self, "Success", f"Template file updated:\n{template_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save template: {str(e)}")
+
     def toggle_monitoring(self):
         """Toggle folder monitoring on/off"""
         if self.is_monitoring:
@@ -714,8 +736,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 'cc_emails': [e.strip() for e in self.cc_emails_edit.text().split(';') if e.strip()],
                 'bcc_emails': [e.strip() for e in self.bcc_emails_edit.text().split(';') if e.strip()],
                 'subject': self.email_subject_edit.text().strip(),
-                'selected_template': selected_template,
-                'body_text': self.email_body_edit.toPlainText()
+                'selected_template': selected_template
             }
 
             config_data = {
@@ -887,7 +908,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             return
 
         try:
-            template_dir = self.config_manager.get_template_dir()
+            template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
             template_path = os.path.join(template_dir, template_name)
 
             if os.path.exists(template_path):
