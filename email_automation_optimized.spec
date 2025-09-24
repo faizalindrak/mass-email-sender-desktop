@@ -70,9 +70,31 @@ a = Analysis(
     binaries=[],
     datas=get_project_data_files() + get_pyside6_fluent_resources(),
     hiddenimports=[
+        # Python built-in modules (critical)
+        'ast',
+        'dis',  # Required by inspect module
+        'inspect',
+        'copy',
+        'pickle',
+        'struct',
+        'operator',
+        'weakref',
+        'gc',
+        'io',
+        'codecs',
+        'encodings',
+        'encodings.utf_8',
+        'encodings.cp1252',
+        'locale',
+        'warnings',
+        'linecache',
+        'keyword',
+        'token',
+        'tokenize',
+        
         # PySide6 core modules
         'PySide6.QtCore',
-        'PySide6.QtGui', 
+        'PySide6.QtGui',
         'PySide6.QtWidgets',
         'PySide6.QtNetwork',
         'PySide6.QtSvg',
@@ -191,15 +213,15 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Exclude unused GUI frameworks
+        # Only exclude really unnecessary GUI frameworks
         'tkinter',
         'PyQt5',
-        'PyQt6', 
+        'PyQt6',
         'wx',
         'kivy',
         'toga',
         
-        # Exclude heavy scientific libraries
+        # Only exclude the heaviest scientific libraries
         'numpy',
         'pandas',
         'scipy',
@@ -209,16 +231,11 @@ a = Analysis(
         'bokeh',
         'altair',
         
-        # Exclude development tools
+        # Exclude development/testing tools only
         'pytest',
         'unittest',
         'doctest',
         'pdb',
-        'cProfile',
-        'profile',
-        'pstats',
-        'timeit',
-        'trace',
         
         # Exclude Jupyter/IPython
         'IPython',
@@ -243,46 +260,9 @@ a = Analysis(
         'mysql',
         'postgresql',
         
-        # Exclude image processing (if not needed)
-        'PIL',
-        'Pillow',
-        'opencv',
-        'skimage',
-        
-        # Exclude networking libraries (if not needed)
-        'requests',
-        'urllib3',
-        'httpx',
-        'aiohttp',
-        
-        # Exclude compression libraries (if not needed)
-        'zipfile',
-        'tarfile',
-        'gzip',
-        'bz2',
-        'lzma',
-        
-        # Exclude XML processing (if not needed)
-        'xml',
-        'xmlrpc',
-        'html',
-        
-        # Exclude unused standard library modules
+        # Exclude specific unused modules only
         'curses',
         'readline',
-        'rlcompleter',
-        'cmd',
-        'code',
-        'codeop',
-        'dis',
-        'py_compile',
-        'compileall',
-        'keyword',
-        'token',
-        'tokenize',
-        'ast',
-        'symbol',
-        'parser',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -343,3 +323,6 @@ print(f"- Excluded modules: {len(a.excludes)}")
 print(f"\nBuild targets:")
 print(f"- Single file: dist/EmailAutomation.exe")
 print(f"- Directory: dist/EmailAutomation_dist/")
+
+
+
