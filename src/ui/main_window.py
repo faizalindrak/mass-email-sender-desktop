@@ -67,9 +67,11 @@ class EmailAutomationWorker(QThread):
             # Prepare email content
             variables = self.template_engine.prepare_variables(file_path, supplier, custom_vars)
 
-            # Render subject
+            # Resolve subject template: prefer email_form.subject if present; fallback to profile subject_template
+            email_form = profile_config.get('email_form', {}) or {}
+            subject_template = email_form.get('subject') or profile_config.get('subject_template', '[filename_without_ext]')
             subject = self.template_engine.process_simple_variables(
-                profile_config.get('subject_template', '[filename_without_ext]'),
+                subject_template,
                 variables
             )
 
