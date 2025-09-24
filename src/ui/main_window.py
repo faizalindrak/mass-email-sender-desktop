@@ -770,13 +770,16 @@ class MainWindow(FluentWindow):
         # Load profiles
         profiles = self.config_manager.get_available_profiles()
         self.profile_combo.clear()
+        self.profile_names = []  # Store profile names separately
+        
         for profile in profiles:
-            self.profile_combo.addItem(profile['display_name'], profile['name'])
+            self.profile_combo.addItem(profile['display_name'])
+            self.profile_names.append(profile['name'])
 
         # Set current profile
         current_profile = self.config_manager.get_current_profile()
-        for i in range(self.profile_combo.count()):
-            if self.profile_combo.itemData(i) == current_profile:
+        for i, profile_name in enumerate(self.profile_names):
+            if profile_name == current_profile:
                 self.profile_combo.setCurrentIndex(i)
                 break
 
@@ -784,9 +787,11 @@ class MainWindow(FluentWindow):
 
     def load_profile_config(self):
         """Load configuration for selected profile"""
-        profile_name = self.profile_combo.currentData()
-        if not profile_name:
+        current_index = self.profile_combo.currentIndex()
+        if current_index < 0 or current_index >= len(self.profile_names):
             return
+        
+        profile_name = self.profile_names[current_index]
 
         try:
             config = self.config_manager.get_profile_config(profile_name)
@@ -804,9 +809,11 @@ class MainWindow(FluentWindow):
 
             # Set email client
             client = config.get('email_client', 'outlook')
-            index = self.email_client_combo.findText(client)
-            if index >= 0:
-                self.email_client_combo.setCurrentIndex(index)
+            # For fluent ComboBox, we need to find the text manually
+            for i in range(self.email_client_combo.count()):
+                if self.email_client_combo.itemText(i) == client:
+                    self.email_client_combo.setCurrentIndex(i)
+                    break
 
             # Populate file extensions from monitoring folder and preselect from config
             try:
@@ -837,10 +844,15 @@ class MainWindow(FluentWindow):
             if selected_template:
                 # Ensure templates are loaded into combo
                 self.load_templates()
-                idx = self.template_combo.findText(selected_template)
-                if idx >= 0:
-                    self.template_combo.setCurrentIndex(idx)
-                else:
+                # Search for template manually in fluent ComboBox
+                template_found = False
+                for i in range(self.template_combo.count()):
+                    if self.template_combo.itemText(i) == selected_template:
+                        self.template_combo.setCurrentIndex(i)
+                        template_found = True
+                        break
+                
+                if not template_found:
                     # Add missing template name if not present
                     self.template_combo.addItem(selected_template)
                     self.template_combo.setCurrentIndex(self.template_combo.count() - 1)
@@ -1139,9 +1151,11 @@ class MainWindow(FluentWindow):
     def save_current_config(self):
         """Save current configuration"""
         try:
-            profile_name = self.profile_combo.currentData()
-            if not profile_name:
+            current_index = self.profile_combo.currentIndex()
+            if current_index < 0 or current_index >= len(self.profile_names):
                 return
+            
+            profile_name = self.profile_names[current_index]
 
             # Get existing profile to preserve values not present in UI (e.g., file_extensions, subject_template)
             existing = {}
@@ -1278,8 +1292,8 @@ class MainWindow(FluentWindow):
                 self.load_current_config()
 
                 # Set to newly imported profile
-                for i in range(self.profile_combo.count()):
-                    if self.profile_combo.itemData(i) == profile_name:
+                for i, stored_profile_name in enumerate(self.profile_names):
+                    if stored_profile_name == profile_name:
                         self.profile_combo.setCurrentIndex(i)
                         break
 
@@ -1290,10 +1304,12 @@ class MainWindow(FluentWindow):
 
     def save_profile_to_file(self):
         """Save profile configuration to file"""
-        profile_name = self.profile_combo.currentData()
-        if not profile_name:
+        current_index = self.profile_combo.currentIndex()
+        if current_index < 0 or current_index >= len(self.profile_names):
             QMessageBox.warning(self, "Warning", "No profile selected")
             return
+            
+        profile_name = self.profile_names[current_index]
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
