@@ -221,6 +221,15 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         db_layout.addWidget(self.browse_database_btn)
         layout.addLayout(db_layout)
 
+        # Template folder
+        layout.addWidget(QLabel("Template Folder:"))
+        tpl_layout = QHBoxLayout()
+        self.template_dir_edit = QLineEdit()
+        self.browse_template_btn = QPushButton("Browse")
+        tpl_layout.addWidget(self.template_dir_edit)
+        tpl_layout.addWidget(self.browse_template_btn)
+        layout.addLayout(tpl_layout)
+        
         # Monitor folder
         layout.addWidget(QLabel("Monitor Folder:"))
         folder_layout = QHBoxLayout()
@@ -443,6 +452,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.browse_monitor_btn.clicked.connect(self.browse_monitor_folder)
         self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
         self.browse_database_btn.clicked.connect(self.browse_database_file)
+        self.browse_template_btn.clicked.connect(self.browse_template_folder)
         self.preview_btn.clicked.connect(self.generate_preview)
         self.load_profile_btn.clicked.connect(self.load_profile_from_file)
         self.save_profile_btn.clicked.connect(self.save_profile_to_file)
@@ -450,10 +460,10 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.template_combo.currentTextChanged.connect(self.load_selected_template)
         self.insert_var_btn.clicked.connect(self.insert_variable_to_subject)
         self.insert_var_body_btn.clicked.connect(self.insert_variable_to_body)
-
+        
         # Profile combo
         self.profile_combo.currentTextChanged.connect(self.load_profile_config)
-
+        
         # Worker signals
         self.worker.file_processed.connect(self.on_file_processed)
         self.worker.error_occurred.connect(self.on_error_occurred)
@@ -487,7 +497,9 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             # Database path (from global config if not in profile)
             db_path = config.get('database_path', self.config_manager.get_database_path())
             self.database_path_edit.setText(db_path)
-
+            # Template dir (from global config)
+            self.template_dir_edit.setText(self.config_manager.get_template_dir())
+            
             # Other folders and pattern
             self.monitor_folder_edit.setText(config.get('monitor_folder', ''))
             self.sent_folder_edit.setText(config.get('sent_folder', ''))
@@ -607,6 +619,25 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
 
+    def browse_template_folder(self):
+        """Browse for template folder"""
+        initial_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+        folder = QFileDialog.getExistingDirectory(self, "Select Template Folder", initial_dir)
+        if folder:
+            self.template_dir_edit.setText(folder)
+            try:
+                # Persist to global JSON config
+                self.config_manager.set_template_dir(folder)
+                # Reinitialize template engine with new directory
+                self.template_engine = EmailTemplateEngine(folder)
+                self.worker.template_engine = self.template_engine
+                # Reload templates and content
+                self.load_templates()
+                self.load_selected_template()
+                self.status_bar.showMessage(f"Template folder set to: {folder}", 3000)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to set template folder: {str(e)}")
+
     def toggle_monitoring(self):
         """Toggle folder monitoring on/off"""
         if self.is_monitoring:
@@ -723,8 +754,12 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             db_path_text = self.database_path_edit.text().strip()
             if db_path_text:
                 self.config_manager.set_database_path(db_path_text)
+            # Persist template directory path to global config
+            tpl_dir_text = self.template_dir_edit.text().strip()
+            if tpl_dir_text:
+                self.config_manager.set_template_dir(tpl_dir_text)
             self.config_manager.set_current_profile(profile_name)
-
+            
             self.config_manager.save_profile_config(profile_name, config_data)
 
         except Exception as e:
@@ -830,17 +865,18 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
     def load_templates(self):
         """Load available templates into combo box"""
         try:
-            template_dir = self.config_manager.get_template_dir()
+            # Prefer the path from UI if present, otherwise fallback to config
+            template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
             if not os.path.exists(template_dir):
                 os.makedirs(template_dir, exist_ok=True)
-
+            
             self.template_combo.clear()
             self.template_combo.addItem("-- Select Template --")
-
+            
             for filename in os.listdir(template_dir):
                 if filename.endswith(('.html', '.htm', '.txt')):
                     self.template_combo.addItem(filename)
-
+            
         except Exception as e:
             self.logger.error(f"Failed to load templates: {str(e)}")
 

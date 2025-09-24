@@ -204,6 +204,12 @@ class ConfigManager:
         template_dir = self.global_config.get("template_dir", "templates")
         return os.path.abspath(template_dir)
 
+    def set_template_dir(self, template_dir: str):
+        """Set templates directory path in global config"""
+        if template_dir and isinstance(template_dir, str):
+            self.global_config["template_dir"] = template_dir
+            self.save_config()
+
     def should_auto_start_monitoring(self) -> bool:
         """Check if monitoring should auto-start from global config"""
         return bool(self.global_config.get("auto_start_monitoring", False))
