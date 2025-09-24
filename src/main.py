@@ -46,6 +46,18 @@ def main():
         app.setApplicationName("Email Automation Desktop")
         app.setApplicationVersion("1.0.0")
         app.setOrganizationName("Email Automation")
+        
+        # Set application icon
+        try:
+            from PySide6.QtGui import QIcon
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), 'icon.ico')
+            if os.path.exists(icon_path):
+                app.setWindowIcon(QIcon(icon_path))
+                print(f"Application icon set: {icon_path}")
+            else:
+                print(f"Icon file not found: {icon_path}")
+        except Exception as e:
+            print(f"Failed to set application icon: {e}")
 
         # Enable high DPI scaling (remove deprecated warnings)
         # These are deprecated in newer Qt versions but still needed for older versions

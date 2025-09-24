@@ -158,6 +158,14 @@ class MainWindow(FluentWindow):
         self.setWindowTitle("Email Automation Desktop")
         self.resize(1200, 800)
         
+        # Set window icon
+        try:
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'icon.ico')
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception as e:
+            print(f"Failed to set window icon: {e}")
+        
         # Set fluent theme
         setTheme(Theme.AUTO)
 

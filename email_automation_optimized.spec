@@ -293,7 +293,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add icon path if available: 'assets/icon.ico'
+    icon='icon.ico',  # Application icon
     version=None,  # Add version info if available
     uac_admin=False,  # Set to True if admin rights needed
     uac_uiaccess=False,
@@ -323,6 +323,8 @@ print(f"- Excluded modules: {len(a.excludes)}")
 print(f"\nBuild targets:")
 print(f"- Single file: dist/EmailAutomation.exe")
 print(f"- Directory: dist/EmailAutomation_dist/")
+
+
 
 
 
