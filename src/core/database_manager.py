@@ -148,11 +148,14 @@ class DatabaseManager:
             ''', (limit, offset))
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_all_suppliers(self):
+    def get_all_suppliers(self, limit=None):
         """Get all active suppliers"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM suppliers WHERE active = 1 ORDER BY supplier_name")
+            query = "SELECT * FROM suppliers WHERE active = 1 ORDER BY supplier_name"
+            if limit:
+                query += f" LIMIT {limit}"
+            cursor.execute(query)
             return [dict(row) for row in cursor.fetchall()]
 
     def update_supplier(self, supplier_id, **kwargs):

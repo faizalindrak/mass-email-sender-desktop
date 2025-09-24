@@ -61,6 +61,12 @@ class FolderMonitor:
             if not os.path.exists(folder_path):
                 raise FileNotFoundError(f"Monitor folder does not exist: {folder_path}")
 
+            # Auto-create sent folder if it doesn't exist
+            sent_folder = os.path.join(folder_path, "sent")
+            if not os.path.exists(sent_folder):
+                os.makedirs(sent_folder, exist_ok=True)
+                self.logger.info(f"Created sent folder: {sent_folder}")
+
             self.current_handler = FileHandler(callback, key_pattern, file_extensions)
             self.observer.schedule(self.current_handler, folder_path, recursive=False)
             self.observer.start()
