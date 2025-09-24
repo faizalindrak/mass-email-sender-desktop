@@ -268,6 +268,21 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.email_client_combo.addItems(["outlook", "thunderbird", "smtp"])
         layout.addWidget(self.email_client_combo)
 
+        # File Types to Monitor
+        layout.addWidget(QLabel("File Types to Monitor:"))
+        ext_controls_layout = QHBoxLayout()
+        self.scan_extensions_btn = QPushButton("Scan Extensions")
+        self.select_all_ext_btn = QPushButton("Select All")
+        self.clear_ext_btn = QPushButton("Clear")
+        ext_controls_layout.addWidget(self.scan_extensions_btn)
+        ext_controls_layout.addWidget(self.select_all_ext_btn)
+        ext_controls_layout.addWidget(self.clear_ext_btn)
+        ext_controls_layout.addStretch()
+        layout.addLayout(ext_controls_layout)
+
+        self.extensions_list = QListWidget()
+        layout.addWidget(self.extensions_list)
+        
         # Constant Variables Section
         const_vars_group = QGroupBox("Constant Variables")
         const_vars_layout = QVBoxLayout(const_vars_group)
@@ -473,6 +488,10 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.template_combo.currentTextChanged.connect(self.load_selected_template)
         self.insert_var_btn.clicked.connect(self.insert_variable_to_subject)
         self.insert_var_body_btn.clicked.connect(self.insert_variable_to_body)
+        # Extensions controls
+        self.scan_extensions_btn.clicked.connect(self.scan_monitor_folder_extensions)
+        self.select_all_ext_btn.clicked.connect(self.select_all_extensions)
+        self.clear_ext_btn.clicked.connect(self.clear_extensions_selection)
         
         # Profile combo
         self.profile_combo.currentTextChanged.connect(self.load_profile_config)
@@ -523,6 +542,12 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             index = self.email_client_combo.findText(client)
             if index >= 0:
                 self.email_client_combo.setCurrentIndex(index)
+
+            # Populate file extensions from monitoring folder and preselect from config
+            try:
+                self.scan_monitor_folder_extensions(preselected=config.get('file_extensions', []))
+            except Exception as _:
+                pass
 
             # Load constant variables
             self.default_cc_edit.setText(config.get('default_cc', ''))
@@ -593,6 +618,11 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             if not self.sent_folder_edit.text():
                 sent_folder = os.path.join(folder, "sent")
                 self.sent_folder_edit.setText(sent_folder)
+            # Scan and populate available file extensions from selected folder
+            try:
+                self.scan_monitor_folder_extensions(preselected=self.config_manager.get_profile_config().get('file_extensions', []))
+            except Exception as _:
+                pass
 
     def browse_sent_folder(self):
         """Browse for sent folder"""
@@ -608,6 +638,65 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             # Auto-create sent folder inside monitor folder if not selected
             sent_folder = os.path.join(monitor_folder, "sent")
             self.sent_folder_edit.setText(sent_folder)
+
+    def scan_monitor_folder_extensions(self, preselected=None):
+        """Scan the monitoring folder and populate available file extensions"""
+        try:
+            monitor_folder = self.monitor_folder_edit.text().strip()
+            extensions = set()
+            if monitor_folder and os.path.exists(monitor_folder):
+                for filename in os.listdir(monitor_folder):
+                    file_path = os.path.join(monitor_folder, filename)
+                    if os.path.isfile(file_path):
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext:
+                            extensions.add(ext)
+            # Fallback defaults if no extensions found
+            if not extensions:
+                extensions = {'.pdf', '.xlsx', '.docx', '.txt'}
+            self.update_extensions_list(sorted(extensions), preselected or [])
+        except Exception as e:
+            self.logger.error(f"Failed to scan extensions: {str(e)}")
+
+    def update_extensions_list(self, extensions, selected):
+        """Update the extensions list with checkable items and preselected values"""
+        try:
+            self.extensions_list.clear()
+            for ext in extensions:
+                item = QListWidgetItem(ext)
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(Qt.Checked if ext in selected else Qt.Unchecked)
+                self.extensions_list.addItem(item)
+        except Exception as e:
+            self.logger.error(f"Failed to update extensions list: {str(e)}")
+
+    def get_selected_extensions(self):
+        """Get currently selected extensions from the list"""
+        selected = []
+        try:
+            for i in range(self.extensions_list.count()):
+                item = self.extensions_list.item(i)
+                if item.checkState() == Qt.Checked:
+                    selected.append(item.text())
+        except Exception as e:
+            self.logger.error(f"Failed to read selected extensions: {str(e)}")
+        return selected
+
+    def select_all_extensions(self):
+        """Select all extensions in the list"""
+        try:
+            for i in range(self.extensions_list.count()):
+                self.extensions_list.item(i).setCheckState(Qt.Checked)
+        except Exception as e:
+            self.logger.error(f"Failed to select all extensions: {str(e)}")
+
+    def clear_extensions_selection(self):
+        """Clear all selections in the extensions list"""
+        try:
+            for i in range(self.extensions_list.count()):
+                self.extensions_list.item(i).setCheckState(Qt.Unchecked)
+        except Exception as e:
+            self.logger.error(f"Failed to clear extensions selection: {str(e)}")
 
     def browse_database_file(self):
         """Browse for database file"""
@@ -773,10 +862,10 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 # Templates
                 'subject_template': existing.get('subject_template', '[filename_without_ext]'),
                 'body_template': selected_template,
-
-                # Preserve file extensions if existing
-                'file_extensions': existing.get('file_extensions', []),
-
+                
+                # File extensions selected from UI (fallback to existing if none selected)
+                'file_extensions': (self.get_selected_extensions() or existing.get('file_extensions', [])),
+                
                 # Constant variables
                 'default_cc': self.default_cc_edit.text(),
                 'default_bcc': self.default_bcc_edit.text(),
