@@ -179,6 +179,15 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         profile_row.addWidget(self.save_profile_btn)
         layout.addLayout(profile_row)
 
+        # Database file
+        layout.addWidget(QLabel("Database File:"))
+        db_layout = QHBoxLayout()
+        self.database_path_edit = QLineEdit()
+        self.browse_database_btn = QPushButton("Browse")
+        db_layout.addWidget(self.database_path_edit)
+        db_layout.addWidget(self.browse_database_btn)
+        layout.addLayout(db_layout)
+
         # Monitor folder
         layout.addWidget(QLabel("Monitor Folder:"))
         folder_layout = QHBoxLayout()
@@ -404,6 +413,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.stop_btn.clicked.connect(self.stop_monitoring)
         self.browse_monitor_btn.clicked.connect(self.browse_monitor_folder)
         self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
+        self.browse_database_btn.clicked.connect(self.browse_database_file)
         self.preview_btn.clicked.connect(self.generate_preview)
         self.load_profile_btn.clicked.connect(self.load_profile_from_file)
         self.save_profile_btn.clicked.connect(self.save_profile_to_file)
@@ -445,6 +455,11 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         try:
             config = self.config_manager.get_profile_config(profile_name)
 
+            # Database path
+            db_path = config.get('database_path', self.config_manager.get_database_path())
+            self.database_path_edit.setText(db_path)
+
+            # Other folders and pattern
             self.monitor_folder_edit.setText(config.get('monitor_folder', ''))
             self.sent_folder_edit.setText(config.get('sent_folder', ''))
             self.key_pattern_edit.setText(config.get('key_pattern', ''))
@@ -477,6 +492,16 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 except:
                     pass
 
+            # Reinitialize DatabaseManager if path changed
+            try:
+                abs_db_path = os.path.abspath(db_path)
+                if abs_db_path != getattr(self.database_manager, 'db_path', None):
+                    self.database_manager = DatabaseManager(abs_db_path)
+                    self.worker.database_manager = self.database_manager
+                    self.refresh_logs_table()
+            except Exception as db_e:
+                self.logger.error(f"Failed to initialize database: {str(db_e)}")
+
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load profile: {str(e)}")
 
@@ -504,6 +529,26 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             # Auto-create sent folder inside monitor folder if not selected
             sent_folder = os.path.join(monitor_folder, "sent")
             self.sent_folder_edit.setText(sent_folder)
+
+    def browse_database_file(self):
+        """Browse for database file"""
+        initial_dir = os.path.dirname(self.database_path_edit.text().strip() or os.path.abspath("database"))
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Database File",
+            initial_dir,
+            "SQLite Database (*.db);;All files (*.*)"
+        )
+        if file_path:
+            self.database_path_edit.setText(file_path)
+            # Reinitialize database manager with new path and update worker
+            try:
+                self.database_manager = DatabaseManager(file_path)
+                self.worker.database_manager = self.database_manager
+                self.refresh_logs_table()
+                self.status_bar.showMessage(f"Database set to: {file_path}", 3000)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
 
     def start_monitoring(self):
         """Start folder monitoring"""
@@ -558,6 +603,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 return
 
             config_data = {
+                'database_path': self.database_path_edit.text(),
                 'monitor_folder': self.monitor_folder_edit.text(),
                 'sent_folder': self.sent_folder_edit.text(),
                 'key_pattern': self.key_pattern_edit.text(),

@@ -1,15 +1,2 @@
 venv/
-__pycache__/
-src/core/__pycache__/__init__.cpython-312.pyc
-src/core/__pycache__/__init__.cpython-312.pyc
-.gitignore
-src/core/__pycache__/__init__.cpython-312.pyc
-src/core/__pycache__/config_manager.cpython-312.pyc
-src/core/__pycache__/database_manager.cpython-312.pyc
-src/core/__pycache__/email_sender.cpython-312.pyc
-src/core/__pycache__/folder_monitor.cpython-312.pyc
-src/core/__pycache__/template_engine.cpython-312.pyc
-src/ui/__pycache__/__init__.cpython-312.pyc
-src/ui/__pycache__/main_window.cpython-312.pyc
-src/utils/__pycache__/__init__.cpython-312.pyc
-src/utils/__pycache__/logger.cpython-312.pyc
+*.pyc
