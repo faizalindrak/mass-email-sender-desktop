@@ -1681,8 +1681,13 @@ class MainWindow(FluentWindow):
                 # Recipients column - show recipient emails
                 recipient_emails = log.get('recipient_emails', '[]')
                 try:
-                    emails = json.loads(recipient_emails) if recipient_emails else []
-                    if emails:
+                    # Handle empty, null, or invalid JSON data
+                    if not recipient_emails or recipient_emails == '[]' or recipient_emails == '':
+                        emails = []
+                    else:
+                        emails = json.loads(recipient_emails)
+
+                    if emails and isinstance(emails, list):
                         recipients_text = '\n'.join(emails[:3])  # Show first 3 emails
                         if len(emails) > 3:
                             recipients_text += f"\n... (+{len(emails) - 3} more)"
@@ -1694,9 +1699,16 @@ class MainWindow(FluentWindow):
                     else:
                         recipients_text = 'No recipients'
                         recipients_item = QTableWidgetItem(recipients_text)
-                except:
-                    recipients_text = 'Invalid data'
-                    recipients_item = QTableWidgetItem(recipients_text)
+                except (json.JSONDecodeError, TypeError) as e:
+                    # Handle malformed JSON or other parsing errors
+                    if recipient_emails and recipient_emails != '[]':
+                        # Try to extract emails from malformed JSON or show raw data
+                        recipients_text = str(recipient_emails)[:50] + "..." if len(str(recipient_emails)) > 50 else str(recipient_emails)
+                        recipients_item = QTableWidgetItem(recipients_text)
+                        recipients_item.setToolTip(f"Raw data: {recipient_emails}")
+                    else:
+                        recipients_text = 'No recipients'
+                        recipients_item = QTableWidgetItem(recipients_text)
 
                 self.logs_table.setItem(row, 4, recipients_item)
 
