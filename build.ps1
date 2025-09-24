@@ -20,9 +20,262 @@ $RequirementsFile = "requirements_optimized.txt"
 
 # Colors for output
 $ColorInfo = "Cyan"
-$ColorSuccess = "Green" 
+$ColorSuccess = "Green"
 $ColorWarning = "Yellow"
 $ColorError = "Red"
+
+# PyInstaller configuration details
+$HiddenImports = @(
+    # Python built-in modules (critical)
+    'ast',
+    'dis',
+    'inspect',
+    'copy',
+    'pickle',
+    'struct',
+    'operator',
+    'weakref',
+    'gc',
+    'io',
+    'codecs',
+    'encodings',
+    'encodings.utf_8',
+    'encodings.cp1252',
+    'locale',
+    'warnings',
+    'linecache',
+    'keyword',
+    'token',
+    'tokenize',
+
+    # PySide6 core modules
+    'PySide6.QtCore',
+    'PySide6.QtGui',
+    'PySide6.QtWidgets',
+    'PySide6.QtNetwork',
+    'PySide6.QtSvg',
+    'PySide6.QtPrintSupport',
+
+    # Shiboken6
+    'shiboken6',
+
+    # Fluent widgets
+    'qfluentwidgets',
+    'qfluentwidgets.common',
+    'qfluentwidgets.common.config',
+    'qfluentwidgets.common.icon',
+    'qfluentwidgets.common.style_sheet',
+    'qfluentwidgets.components',
+    'qfluentwidgets.components.widgets',
+    'qfluentwidgets.components.layout',
+    'qfluentwidgets.components.dialog_box',
+    'qfluentwidgets.components.material',
+    'qfluentwidgets.window',
+    'qfluentwidgets._rc',
+
+    # Windows COM for Outlook
+    'win32com.client',
+    'win32com.client.gencache',
+    'win32com.client.CLSIDToClass',
+    'win32com.client.util',
+    'win32com.server',
+    'win32com.server.util',
+    'pythoncom',
+    'pywintypes',
+    'win32api',
+    'win32con',
+    'win32gui',
+    'win32process',
+
+    # File monitoring
+    'watchdog',
+    'watchdog.observers',
+    'watchdog.observers.winapi',
+    'watchdog.events',
+    'watchdog.utils',
+
+    # Template engine
+    'jinja2',
+    'jinja2.ext',
+    'jinja2.loaders',
+    'jinja2.runtime',
+    'jinja2.compiler',
+    'jinja2.environment',
+    'markupsafe',
+
+    # Email modules
+    'smtplib',
+    'email',
+    'email.mime',
+    'email.mime.multipart',
+    'email.mime.text',
+    'email.mime.base',
+    'email.mime.application',
+    'email.mime.message',
+    'email.encoders',
+    'email.utils',
+    'email.header',
+    'email.charset',
+
+    # Database
+    'sqlite3',
+
+    # Configuration
+    'configparser',
+
+    # Logging
+    'logging',
+    'logging.handlers',
+    'logging.config',
+
+    # Standard library essentials
+    'pathlib',
+    'contextlib',
+    'functools',
+    'itertools',
+    'collections',
+    'collections.abc',
+    'typing',
+    'json',
+    'os',
+    'sys',
+    're',
+    'datetime',
+    'time',
+    'threading',
+    'queue',
+    'traceback',
+    'base64',
+    'uuid',
+    'hashlib',
+    'hmac',
+    'urllib',
+    'urllib.parse',
+    'urllib.request',
+    'urllib.error',
+    'ssl',
+    'socket',
+
+    # Package management (for runtime)
+    'pkg_resources',
+    'importlib',
+    'importlib.util',
+    'importlib.metadata',
+
+    # Theme detection
+    'darkdetect'
+)
+
+$ExcludedModules = @(
+    # Only exclude really unnecessary GUI frameworks
+    'tkinter',
+    'PyQt5',
+    'PyQt6',
+    'wx',
+    'kivy',
+    'toga',
+
+    # Only exclude the heaviest scientific libraries
+    'numpy',
+    'pandas',
+    'scipy',
+    'matplotlib',
+    'seaborn',
+    'plotly',
+    'bokeh',
+    'altair',
+
+    # Exclude development/testing tools only
+    'pytest',
+    'unittest',
+    'doctest',
+    'pdb',
+
+    # Exclude Jupyter/IPython
+    'IPython',
+    'jupyter',
+    'notebook',
+    'jupyterlab',
+    'ipykernel',
+    'ipywidgets',
+
+    # Exclude unused web frameworks
+    'django',
+    'flask',
+    'fastapi',
+    'tornado',
+    'pyramid',
+    'bottle',
+
+    # Exclude unused databases
+    'psycopg2',
+    'pymongo',
+    'redis',
+    'mysql',
+    'postgresql',
+
+    # Exclude specific unused modules only
+    'curses',
+    'readline'
+)
+
+$DataDirectories = @(
+    @{ Source = "templates"; Target = "templates" },
+    @{ Source = "config"; Target = "config" },
+    @{ Source = "database"; Target = "database" },
+    @{ Source = "logs"; Target = "logs" }
+)
+
+$CollectPackages = @(
+    "qfluentwidgets"
+)
+
+function Get-QFluentResourceMappings {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$PythonExecutable
+    )
+
+    $script = @"
+import json
+import os
+
+try:
+    import qfluentwidgets
+    base_path = os.path.dirname(qfluentwidgets.__file__)
+    resource_dirs = []
+    for dirname in ['qss', 'resources', '_rc']:
+        path = os.path.join(base_path, dirname)
+        if os.path.exists(path):
+            resource_dirs.append([path, f'qfluentwidgets/{dirname}'])
+    print(json.dumps({'resources': resource_dirs}))
+except Exception as exc:
+    print(json.dumps({'error': str(exc)}))
+"@
+
+    try {
+        $raw = & $PythonExecutable -c $script 2>$null
+    } catch {
+        return @()
+    }
+
+    if (-not $raw) {
+        return @()
+    }
+
+    try {
+        $parsed = $raw | ConvertFrom-Json
+    } catch {
+        return @()
+    }
+
+    if ($parsed.error) {
+        Write-Host "Warning: Failed to resolve qfluentwidgets resources: $($parsed.error)" -ForegroundColor $ColorWarning
+        return @()
+    }
+
+    return $parsed.resources
+}
 
 # Display help
 if ($Help) {
@@ -174,45 +427,151 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host $PyInstallerCheck -ForegroundColor $ColorSuccess
 }
 
-# Create directories
+# Create output directories
 New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+New-Item -ItemType Directory -Path "build" -Force | Out-Null
 
-# Update spec file for current build options
 Show-Progress "BUILD" "Preparing build configuration..."
 
-$SpecContent = Get-Content $SpecFile -Raw
+try {
+    $SrcPath = (Resolve-Path "src").Path
+} catch {
+    Write-Host "ERROR: Could not resolve project source directory" -ForegroundColor $ColorError
+    exit 1
+}
+
+# Ensure required data directories exist and gather add-data arguments
+$AddDataArgs = @()
+foreach ($dirEntry in $DataDirectories) {
+    $sourcePath = $null
+
+    if ($dirEntry.Source -eq "logs" -and -not (Test-Path $dirEntry.Source)) {
+        New-Item -ItemType Directory -Path $dirEntry.Source -Force | Out-Null
+    }
+
+    if (Test-Path $dirEntry.Source) {
+        $sourcePath = (Resolve-Path $dirEntry.Source).Path
+        $AddDataArgs += "--add-data=$sourcePath;$($dirEntry.Target)"
+        Write-Host "Including data directory: $($dirEntry.Source) -> $($dirEntry.Target)" -ForegroundColor $ColorInfo
+    } else {
+        Write-Host "Warning: Data directory not found: $($dirEntry.Source)" -ForegroundColor $ColorWarning
+    }
+}
+
+$QFluentResources = Get-QFluentResourceMappings -PythonExecutable $Python
+foreach ($resourcePair in $QFluentResources) {
+    if ($resourcePair.Length -ge 2) {
+        $resSource = $resourcePair[0]
+        $resTarget = $resourcePair[1]
+        if (Test-Path $resSource) {
+            $resolvedResSource = (Resolve-Path $resSource).Path
+            $AddDataArgs += "--add-data=$resolvedResSource;$resTarget"
+            Write-Host "Including qfluentwidgets resource: $resSource -> $resTarget" -ForegroundColor $ColorInfo
+        }
+    }
+}
+
+# Determine PyInstaller executable preference
+$script:PyInstallerExe = ""
+$PossibleExe = ""
+try {
+    $PossibleExe = Join-Path (Split-Path -Parent $Python) "pyinstaller.exe"
+} catch {
+    $PossibleExe = ""
+}
+
+if ($PossibleExe -and (Test-Path $PossibleExe)) {
+    $script:PyInstallerExe = $PossibleExe
+} elseif (Test-CommandExists "pyinstaller.exe") {
+    $script:PyInstallerExe = (Get-Command "pyinstaller.exe").Source
+} elseif (Test-CommandExists "pyinstaller") {
+    $script:PyInstallerExe = (Get-Command "pyinstaller").Source
+}
+
+function Invoke-PyInstaller {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$Args,
+        [Parameter(Mandatory=$true)][string]$Description
+    )
+
+    Write-Host ""
+    Write-Host "Running PyInstaller ($Description)..." -ForegroundColor $ColorInfo
+
+    if ($script:PyInstallerExe) {
+        Write-Host "Command: $script:PyInstallerExe $($Args -join ' ')" -ForegroundColor $ColorInfo
+        & $script:PyInstallerExe @Args
+    } else {
+        Write-Host "Command: $Python -m PyInstaller $($Args -join ' ')" -ForegroundColor $ColorInfo
+        & $Python -m PyInstaller @Args
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: PyInstaller $Description build failed" -ForegroundColor $ColorError
+        exit 1
+    }
+}
+
+# Compose common PyInstaller arguments
+$CommonArgs = @("--noconfirm", "--clean", "--name", $AppName, "--paths", $SrcPath)
+
 if ($Debug) {
-    $SpecContent = $SpecContent -replace "console=False", "console=True"
-    Write-Host "Debug console enabled" -ForegroundColor $ColorWarning
+    $CommonArgs += "--debug=all"
 } else {
-    $SpecContent = $SpecContent -replace "console=True", "console=False"
+    $CommonArgs += "--windowed"
 }
 
 if ($NoUPX) {
-    $SpecContent = $SpecContent -replace "upx=True", "upx=False"
+    $CommonArgs += "--noupx"
     Write-Host "UPX compression disabled" -ForegroundColor $ColorWarning
-} else {
-    $SpecContent = $SpecContent -replace "upx=False", "upx=True"
 }
 
-Set-Content -Path $SpecFile -Value $SpecContent
+$IconPath = $null
+if (Test-Path "icon.ico") {
+    $IconPath = (Resolve-Path "icon.ico").Path
+    $CommonArgs += "--icon=$IconPath"
+    $CommonArgs += "--add-data=$IconPath;icon.ico"
+    Write-Host "Using icon.ico as application icon (PyInstaller argument & data asset)" -ForegroundColor $ColorSuccess
+} else {
+    Write-Host "Warning: icon.ico not found, building without custom icon" -ForegroundColor $ColorWarning
+}
 
-# Build executable
-Show-Progress "BUILD" "Building executable with PyInstaller..."
+foreach ($module in $HiddenImports) {
+    $CommonArgs += "--hidden-import=$module"
+}
+
+foreach ($module in $ExcludedModules) {
+    $CommonArgs += "--exclude-module=$module"
+}
+
+foreach ($pkg in $CollectPackages) {
+    $CommonArgs += "--collect-all=$pkg"
+}
+
+$CommonArgs += $AddDataArgs
+
 Write-Host "This may take several minutes..." -ForegroundColor $ColorWarning
 
-$BuildArgs = @("--noconfirm", "--clean")
-if ($Debug) {
-    $BuildArgs += "--debug=all"
-}
+# Build single-file executable
+$OneFileArgs = $CommonArgs + @(
+    "--onefile",
+    "--distpath", "dist",
+    "--workpath", "build\onefile",
+    "--specpath", "build\spec\onefile",
+    "src\main.py"
+)
 
-& $Python -m PyInstaller @BuildArgs $SpecFile
+Invoke-PyInstaller -Args $OneFileArgs -Description "single-file"
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: PyInstaller build failed" -ForegroundColor $ColorError
-    Write-Host "Check the error messages above for details" -ForegroundColor $ColorError
-    exit 1
-}
+# Build directory distribution
+$DirBuildArgs = $CommonArgs + @(
+    "--onedir",
+    "--distpath", "dist\${AppName}_dist",
+    "--workpath", "build\onedir",
+    "--specpath", "build\spec\onedir",
+    "src\main.py"
+)
+
+Invoke-PyInstaller -Args $DirBuildArgs -Description "directory"
 
 # Verify build outputs
 Show-Progress "VERIFY" "Checking build outputs..."

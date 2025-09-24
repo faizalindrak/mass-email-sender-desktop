@@ -24,6 +24,7 @@ from core.folder_monitor import FolderMonitor
 from core.email_sender import EmailSenderFactory
 from core.template_engine import EmailTemplateEngine
 from utils.logger import setup_logger
+from utils.resources import get_resource_path
 
 class EmailAutomationWorker(QThread):
     """Worker thread for email automation"""
@@ -160,7 +161,7 @@ class MainWindow(FluentWindow):
         
         # Set window icon
         try:
-            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'icon.ico')
+            icon_path = get_resource_path('icon.ico')
             if os.path.exists(icon_path):
                 self.setWindowIcon(QIcon(icon_path))
         except Exception as e:

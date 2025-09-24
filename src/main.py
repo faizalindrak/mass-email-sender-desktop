@@ -28,6 +28,7 @@ try:
     from core.config_manager import ConfigManager
     from core.template_engine import EmailTemplateEngine
     from utils.logger import setup_logger
+    from utils.resources import get_resource_path
     print("Local modules imported successfully")
 except ImportError as e:
     print(f"Failed to import local modules: {e}")
@@ -50,7 +51,7 @@ def main():
         # Set application icon
         try:
             from PySide6.QtGui import QIcon
-            icon_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), 'icon.ico')
+            icon_path = get_resource_path('icon.ico')
             if os.path.exists(icon_path):
                 app.setWindowIcon(QIcon(icon_path))
                 print(f"Application icon set: {icon_path}")
