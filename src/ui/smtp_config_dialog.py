@@ -1,10 +1,10 @@
 import sys
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-                               QLineEdit, QSpinBox, QCheckBox, QPushButton,
-                               QLabel, QMessageBox)
+                                QLineEdit, QSpinBox, QCheckBox, QPushButton,
+                                QLabel, QMessageBox, QFileDialog)
 from PySide6.QtCore import Qt
 from qfluentwidgets import (PrimaryPushButton, PushButton, BodyLabel, TitleLabel,
-                           InfoBar, InfoBarPosition, CardWidget, SimpleCardWidget, ComboBox)
+                            InfoBar, InfoBarPosition, CardWidget, SimpleCardWidget, ComboBox)
 
 from core.email_sender import ThunderbirdSender
 
@@ -88,6 +88,23 @@ class SMTPConfigDialog(QDialog):
         self.tls_checkbox.setChecked(True)
         form_layout.addRow("", self.tls_checkbox)
 
+        # Thunderbird profile path with browse button
+        profile_layout = QHBoxLayout()
+        self.thunderbird_profile_edit = QLineEdit()
+        self.thunderbird_profile_edit.setPlaceholderText("e.g., C:\\Users\\User\\AppData\\Roaming\\Thunderbird\\Profiles\\xxxx.default")
+        profile_layout.addWidget(self.thunderbird_profile_edit)
+
+        self.browse_profile_btn = PushButton("Browse...")
+        self.browse_profile_btn.clicked.connect(self.browse_thunderbird_profile)
+        profile_layout.addWidget(self.browse_profile_btn)
+
+        form_layout.addRow("Thunderbird Profile Path:", profile_layout)
+
+        # Save to Thunderbird checkbox
+        self.save_to_thunderbird_checkbox = QCheckBox("Save emails to Thunderbird Sent folder")
+        self.save_to_thunderbird_checkbox.setChecked(True)
+        form_layout.addRow("", self.save_to_thunderbird_checkbox)
+
         config_layout.addLayout(form_layout)
 
         # Test connection button
@@ -108,7 +125,12 @@ class SMTPConfigDialog(QDialog):
         help_text = BodyLabel(
             "For Gmail: Use smtp.gmail.com with port 587, enable TLS, and use an App Password.\n"
             "For Outlook.com: Use smtp-mail.outlook.com with port 587 and TLS.\n"
-            "For Yahoo: Use smtp.mail.yahoo.com with port 587 and TLS."
+            "For Yahoo: Use smtp.mail.yahoo.com with port 587 and TLS.\n\n"
+            "⚠️ IMPORTANT: For Thunderbird email history to work, you MUST specify the Thunderbird Profile Path.\n"
+            "• Click 'Browse...' to select your Thunderbird profile folder\n"
+            "• The profile folder usually ends with '.default' and contains the Mail folder\n"
+            "• If you don't set this, emails will be sent but won't appear in Thunderbird Sent folder\n"
+            "• Auto-detection may not work reliably - manual selection is recommended"
         )
         help_text.setWordWrap(True)
         help_layout.addWidget(help_text)
@@ -149,6 +171,32 @@ class SMTPConfigDialog(QDialog):
         self.username_edit.setText(self.smtp_config.get('smtp_username', ''))
         self.password_edit.setText(self.smtp_config.get('smtp_password', ''))
         self.tls_checkbox.setChecked(self.smtp_config.get('smtp_use_tls', True))
+        self.thunderbird_profile_edit.setText(self.smtp_config.get('thunderbird_profile', ''))
+        self.save_to_thunderbird_checkbox.setChecked(self.smtp_config.get('save_to_thunderbird', True))
+
+    def browse_thunderbird_profile(self):
+        """Browse for Thunderbird profile directory"""
+        current_path = self.thunderbird_profile_edit.text()
+        if not current_path:
+            # Default to common Thunderbird profile locations
+            import os
+            import platform
+            if platform.system() == "Windows":
+                current_path = os.path.expanduser(r"~\AppData\Roaming\Thunderbird\Profiles")
+            elif platform.system() == "Darwin":  # macOS
+                current_path = os.path.expanduser("~/Library/Thunderbird/Profiles")
+            else:  # Linux
+                current_path = os.path.expanduser("~/.thunderbird")
+
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Thunderbird Profile Directory",
+            current_path,
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+
+        if directory:
+            self.thunderbird_profile_edit.setText(directory)
 
     def get_config(self):
         """Get SMTP configuration from the dialog"""
@@ -167,7 +215,9 @@ class SMTPConfigDialog(QDialog):
             'smtp_port': port,
             'smtp_username': self.username_edit.text().strip(),
             'smtp_password': self.password_edit.text(),
-            'smtp_use_tls': self.tls_checkbox.isChecked()
+            'smtp_use_tls': self.tls_checkbox.isChecked(),
+            'thunderbird_profile': self.thunderbird_profile_edit.text().strip(),
+            'save_to_thunderbird': self.save_to_thunderbird_checkbox.isChecked()
         }
 
     def on_port_changed(self):
@@ -211,7 +261,9 @@ class SMTPConfigDialog(QDialog):
                 smtp_port=config['smtp_port'],
                 username=config['smtp_username'],
                 password=config['smtp_password'],
-                use_tls=config['smtp_use_tls']
+                use_tls=config['smtp_use_tls'],
+                thunderbird_profile=config.get('thunderbird_profile'),
+                save_to_thunderbird=config.get('save_to_thunderbird', True)
             )
 
             # Test connection
@@ -251,5 +303,32 @@ class SMTPConfigDialog(QDialog):
         if not config['smtp_password']:
             QMessageBox.warning(self, "Validation Error", "Password is required")
             return
+
+        # Validate Thunderbird profile path if saving to Thunderbird is enabled
+        if config.get('save_to_thunderbird', True) and not config.get('thunderbird_profile'):
+            reply = QMessageBox.question(
+                self,
+                "Thunderbird Profile Required",
+                "You have enabled 'Save emails to Thunderbird Sent folder' but haven't specified a Thunderbird profile path.\n\n"
+                "Without the profile path, emails will be sent but won't appear in Thunderbird's Sent folder.\n\n"
+                "Do you want to:\n"
+                "• Yes: Continue with profile path selection\n"
+                "• No: Disable Thunderbird history saving\n"
+                "• Cancel: Go back to configuration",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # User wants to select profile path
+                self.browse_thunderbird_profile()
+                return  # Don't accept yet, let user try again
+            elif reply == QMessageBox.StandardButton.No:
+                # User wants to disable Thunderbird saving
+                self.save_to_thunderbird_checkbox.setChecked(False)
+                config['save_to_thunderbird'] = False
+            else:
+                # User cancelled
+                return
 
         super().accept()
