@@ -1,69 +1,99 @@
 // Background script for Email Automation Thunderbird Extension
 // Handles communication with Python application and compose API
 
-let pythonPort = null;
+let websocket = null;
 let composeTabId = null;
+const WEBSOCKET_URL = "ws://localhost:8765";
+let reconnectInterval = 5000; // 5 seconds
 
-// Listen for connections from Python application
-browser.runtime.onConnect.addListener(function(port) {
-  if (port.name === "python-connection") {
-    pythonPort = port;
+function connect() {
+    console.log("Attempting to connect to WebSocket...");
+    websocket = new WebSocket(WEBSOCKET_URL);
 
-    port.onMessage.addListener(function(message) {
-      handlePythonMessage(message);
-    });
+    websocket.onopen = function(event) {
+        console.log("WebSocket connection established");
+    };
 
-    port.onDisconnect.addListener(function() {
-      pythonPort = null;
-      console.log("Python connection disconnected");
-    });
+    websocket.onmessage = function(event) {
+        try {
+            const message = JSON.parse(event.data);
+            handlePythonMessage(message);
+        } catch (e) {
+            console.error("Error parsing message from Python:", e);
+        }
+    };
 
-    console.log("Python connection established");
-  }
-});
+    websocket.onclose = function(event) {
+        console.log("WebSocket connection closed. Reconnecting in " + (reconnectInterval / 1000) + " seconds.");
+        setTimeout(connect, reconnectInterval);
+    };
+
+    websocket.onerror = function(event) {
+        console.error("WebSocket error observed:", event);
+    };
+}
 
 // Handle messages from Python application
 async function handlePythonMessage(message) {
   try {
     console.log("Received message from Python:", message);
 
-    switch (message.action) {
+    // The Python server doesn't send 'action' but 'type'. Let's adapt.
+    const action = message.action || message.type;
+
+    switch (action) {
       case "sendEmail":
-        await sendEmailViaComposeAPI(message.emailData);
+        await sendEmailViaComposeAPI(message.emailData, message.requestId);
         break;
 
-      case "checkComposeAvailability":
+      case "checkAvailability": // Renamed from checkComposeAvailability for consistency
         const available = await checkComposeAPIAvailability();
-        pythonPort.postMessage({
-          type: "composeAvailability",
-          available: available
+        sendMessageToPython({
+          type: "availabilityResponse",
+          available: available,
+          requestId: message.requestId
         });
         break;
 
       case "getAccounts":
         const accounts = await getThunderbirdAccounts();
-        pythonPort.postMessage({
-          type: "accounts",
-          accounts: accounts
+        sendMessageToPython({
+          type: "accountsResponse",
+          accounts: accounts,
+          requestId: message.requestId
         });
         break;
 
+      case "pong":
+        // Server responded to our ping
+        console.log("Received pong from server.");
+        break;
+
       default:
-        console.warn("Unknown action:", message.action);
+        console.warn("Unknown action:", action);
     }
   } catch (error) {
     console.error("Error handling Python message:", error);
-    if (pythonPort) {
-      pythonPort.postMessage({
-        type: "error",
-        error: error.message
-      });
+    if (message.requestId) {
+        sendMessageToPython({
+            type: "error",
+            error: error.message,
+            requestId: message.requestId
+        });
     }
   }
 }
 
+function sendMessageToPython(message) {
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify(message));
+    } else {
+        console.error("WebSocket is not connected. Cannot send message.");
+    }
+}
+
 // Send email using Thunderbird Compose API
-async function sendEmailViaComposeAPI(emailData) {
+async function sendEmailViaComposeAPI(emailData, requestId) {
   try {
     console.log("Sending email via Compose API:", emailData);
 
@@ -98,7 +128,7 @@ async function sendEmailViaComposeAPI(emailData) {
     }
 
     // Listen for compose events
-    setupComposeEventListeners(composeTabId);
+    setupComposeEventListeners(composeTabId, requestId);
 
     // Send the email
     const sendResult = await browser.compose.sendMessage(composeTabId, {
@@ -108,30 +138,28 @@ async function sendEmailViaComposeAPI(emailData) {
     console.log("Email sent successfully:", sendResult);
 
     // Notify Python of success
-    if (pythonPort) {
-      pythonPort.postMessage({
-        type: "emailSent",
-        success: true,
-        messageId: sendResult.headerMessageId
-      });
-    }
+    sendMessageToPython({
+      type: "emailSent",
+      success: true,
+      messageId: sendResult.headerMessageId,
+      requestId: requestId
+    });
 
   } catch (error) {
     console.error("Error sending email via Compose API:", error);
 
     // Notify Python of failure
-    if (pythonPort) {
-      pythonPort.postMessage({
-        type: "emailSent",
-        success: false,
-        error: error.message
-      });
-    }
+    sendMessageToPython({
+      type: "emailSent",
+      success: false,
+      error: error.message,
+      requestId: requestId
+    });
   }
 }
 
 // Setup event listeners for compose window
-function setupComposeEventListeners(tabId) {
+function setupComposeEventListeners(tabId, requestId) {
   // Listen for send events
   browser.compose.onAfterSend.addListener((tab, sendInfo) => {
     if (tab.id === tabId) {
@@ -139,20 +167,18 @@ function setupComposeEventListeners(tabId) {
 
       if (sendInfo.error) {
         console.error("Send error:", sendInfo.error);
-        if (pythonPort) {
-          pythonPort.postMessage({
+        sendMessageToPython({
             type: "sendError",
-            error: sendInfo.error
-          });
-        }
+            error: sendInfo.error,
+            requestId: requestId
+        });
       } else {
         console.log("Email sent successfully");
-        if (pythonPort) {
-          pythonPort.postMessage({
+        sendMessageToPython({
             type: "sendSuccess",
-            messageId: sendInfo.headerMessageId
-          });
-        }
+            messageId: sendInfo.headerMessageId,
+            requestId: requestId
+        });
       }
     }
   });
@@ -205,6 +231,9 @@ async function getThunderbirdAccounts() {
   }
 }
 
+// Initial connection
+connect();
+
 // Handle extension installation
 browser.runtime.onInstalled.addListener((details) => {
   console.log("Email Automation Extension installed/updated");
@@ -219,14 +248,16 @@ browser.runtime.onInstalled.addListener((details) => {
 // Handle extension startup
 browser.runtime.onStartup.addListener(() => {
   console.log("Email Automation Extension started");
+  if (!websocket || websocket.readyState === WebSocket.CLOSED) {
+    connect();
+  }
 });
 
 // Periodic health check
 setInterval(() => {
-  if (pythonPort) {
-    pythonPort.postMessage({
-      type: "ping",
-      timestamp: Date.now()
-    });
-  }
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        sendMessageToPython({ type: "ping", timestamp: Date.now() });
+    } else {
+        console.log("Health check: WebSocket not open.");
+    }
 }, 30000); // Every 30 seconds

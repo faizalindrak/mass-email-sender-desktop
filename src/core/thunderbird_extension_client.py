@@ -146,20 +146,15 @@ class ThunderbirdExtensionClient:
     async def _process_message(self, data: Dict[str, Any]):
         """Process incoming message"""
         message_type = data.get('type')
+        request_id = data.get('requestId')
 
-        if message_type == 'emailSent':
-            # Handle email sent response
-            request_id = data.get('requestId')
-            if request_id and request_id in self.pending_requests:
+        if request_id and request_id in self.pending_requests:
+            if message_type == 'error':
+                self.pending_requests[request_id]['error'] = data.get('error', 'Unknown error')
+            else:
                 self.pending_requests[request_id]['result'] = data
-                self.pending_requests[request_id]['event'].set()
 
-        elif message_type == 'error':
-            # Handle error response
-            request_id = data.get('requestId')
-            if request_id and request_id in self.pending_requests:
-                self.pending_requests[request_id]['error'] = data.get('error')
-                self.pending_requests[request_id]['event'].set()
+            self.pending_requests[request_id]['event'].set()
 
         elif message_type == 'ping':
             # Respond to ping
@@ -168,8 +163,13 @@ class ThunderbirdExtensionClient:
                 'timestamp': data.get('timestamp')
             })
 
+        elif message_type in ['sendSuccess', 'sendError']:
+            # These are secondary notifications from onAfterSend, we can log them.
+            # The primary response is handled via the requestId.
+            self.logger.info(f"Received notification from extension: {message_type}")
+
         else:
-            self.logger.warning(f"Unknown message type: {message_type}")
+            self.logger.warning(f"Unknown message type or no matching request_id: {message_type}")
 
     async def _send_message(self, message: Dict[str, Any]) -> bool:
         """Send message to WebExtension"""
@@ -185,17 +185,14 @@ class ThunderbirdExtensionClient:
             self.logger.error(f"Failed to send message: {str(e)}")
             return False
 
-    async def send_email(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Send email via Thunderbird WebExtension"""
+    async def _send_request_and_wait(self, message: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
+        """Helper to send a request and wait for a response."""
+        if not self.is_connected():
+            raise Exception("Not connected to WebExtension")
+
         self.request_id += 1
         request_id = self.request_id
-
-        # Prepare message
-        message = {
-            'type': 'sendEmail',
-            'requestId': request_id,
-            'emailData': email_data
-        }
+        message['requestId'] = request_id
 
         # Create pending request
         import asyncio
@@ -209,74 +206,52 @@ class ThunderbirdExtensionClient:
         # Send message
         success = await self._send_message(message)
         if not success:
+            del self.pending_requests[request_id]
             raise Exception("Failed to send message to WebExtension")
 
         # Wait for response
         try:
-            await asyncio.wait_for(event.wait(), timeout=60.0)  # 60 second timeout
+            await asyncio.wait_for(event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
-            raise Exception("Timeout waiting for WebExtension response")
+            # Clean up pending request
+            if request_id in self.pending_requests:
+                del self.pending_requests[request_id]
+            raise Exception(f"Timeout waiting for response to {message.get('type')}")
 
         # Get result
-        result = self.pending_requests[request_id]
-        del self.pending_requests[request_id]
-
+        result = self.pending_requests.pop(request_id)
         if result['error']:
-            raise Exception(f"WebExtension error: {result['error']}")
+            raise Exception(f"WebExtension error for {message.get('type')}: {result['error']}")
 
-        return result['result']
+        return result.get('result', {})
+
+    async def send_email(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Send email via Thunderbird WebExtension"""
+        message = {
+            'type': 'sendEmail',
+            'emailData': email_data
+        }
+        return await self._send_request_and_wait(message, timeout=60.0)
 
     async def check_availability(self) -> bool:
-        """Check if WebExtension is available"""
+        """Check if WebExtension is available and responsive."""
         try:
-            message = {
-                'type': 'checkAvailability'
-            }
-
-            success = await self._send_message(message)
-            return success and self.connected
-        except:
+            message = {'type': 'checkAvailability'}
+            result = await self._send_request_and_wait(message, timeout=10.0)
+            return result.get('available', False)
+        except Exception as e:
+            self.logger.warning(f"Availability check failed: {e}")
             return False
 
     async def get_accounts(self) -> List[Dict[str, Any]]:
         """Get Thunderbird accounts"""
-        self.request_id += 1
-        request_id = self.request_id
-
-        message = {
-            'type': 'getAccounts',
-            'requestId': request_id
-        }
-
-        # Create pending request
-        import asyncio
-        event = asyncio.Event()
-        self.pending_requests[request_id] = {
-            'event': event,
-            'result': None,
-            'error': None
-        }
-
-        # Send message
-        success = await self._send_message(message)
-        if not success:
-            return []
-
-        # Wait for response
         try:
-            await asyncio.wait_for(event.wait(), timeout=30.0)
-        except asyncio.TimeoutError:
+            message = {'type': 'getAccounts'}
+            result = await self._send_request_and_wait(message)
+            return result.get('accounts', [])
+        except Exception as e:
+            self.logger.error(f"Error getting accounts: {e}")
             return []
-
-        # Get result
-        result = self.pending_requests[request_id]
-        del self.pending_requests[request_id]
-
-        if result['error']:
-            self.logger.error(f"Error getting accounts: {result['error']}")
-            return []
-
-        return result['result'].get('accounts', [])
 
     def start_websocket_server(self):
         """Start websocket server for WebExtension communication"""
