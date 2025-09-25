@@ -111,6 +111,11 @@ class EmailAutomationWorker(QThread):
             self.logger.info(f"Merged BCC: {merged_bcc}")
 
             # Send email
+            self.logger.info(f"Attempting to send email with attachment: {file_path}")
+            self.logger.info(f"File exists: {os.path.exists(file_path)}")
+            self.logger.info(f"File is file: {os.path.isfile(file_path)}")
+            self.logger.info(f"File size: {os.path.getsize(file_path) if os.path.exists(file_path) else 'N/A'}")
+
             success = email_sender.send_email(
                 to_emails=supplier['emails'],
                 cc_emails=merged_cc,
@@ -137,9 +142,15 @@ class EmailAutomationWorker(QThread):
                 }
                 self.database_manager.log_email_sent(log_data)
 
-                # Move file to sent folder
+                # Move file to sent folder AFTER successful email sending
                 sent_folder = profile_config['sent_folder']
-                self.folder_monitor.move_file_to_sent(file_path, sent_folder)
+                moved_file_path = self.folder_monitor.move_file_to_sent(file_path, sent_folder)
+
+                # Log the file move operation
+                if moved_file_path:
+                    self.logger.info(f"File successfully moved to sent folder: {moved_file_path}")
+                else:
+                    self.logger.warning(f"Failed to move file to sent folder: {file_path}")
 
             self.file_processed.emit(file_path, key, success)
 
@@ -147,9 +158,9 @@ class EmailAutomationWorker(QThread):
             self.logger.error(f"Error processing file {file_path}: {str(e)}")
             self.error_occurred.emit(f"Error processing {os.path.basename(file_path)}: {str(e)}")
         finally:
-            # Ensure a 2-second delay between processing/sending files
+            # Ensure a 3-second delay between processing/sending files to allow file writes to complete
             try:
-                time.sleep(2)
+                time.sleep(3)
             except Exception:
                 pass
 

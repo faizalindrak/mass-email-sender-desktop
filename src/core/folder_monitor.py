@@ -146,9 +146,22 @@ class FolderMonitor:
             filename = os.path.basename(file_path)
             dest_path = os.path.join(sent_folder, filename)
 
-            # Handle duplicate filenames
+            # Handle duplicate filenames with proper extension handling
             counter = 1
             base_name, ext = os.path.splitext(filename)
+
+            # If the base_name already ends with a pattern like "_digit", extract the real base name
+            import re
+            real_base_pattern = re.compile(r'^(.+)_(\d+)$')
+            match = real_base_pattern.match(base_name)
+
+            if match:
+                # Extract the real base name and the highest counter
+                real_base = match.group(1)
+                existing_counter = int(match.group(2))
+                counter = existing_counter + 1
+                base_name = real_base
+
             while os.path.exists(dest_path):
                 new_filename = f"{base_name}_{counter}{ext}"
                 dest_path = os.path.join(sent_folder, new_filename)

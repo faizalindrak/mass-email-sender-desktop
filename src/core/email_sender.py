@@ -6,6 +6,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 import os
 import logging
+import time
 from typing import List, Optional
 
 class EmailSenderBase:
@@ -31,10 +32,50 @@ class OutlookSender(EmailSenderBase):
             raise Exception("Outlook tidak terinstall atau tidak dapat diakses")
 
     def send_email(self, to_emails: List[str], cc_emails: List[str] = None,
-                   bcc_emails: List[str] = None, subject: str = "", body: str = "",
-                   attachment_path: Optional[str] = None) -> bool:
+                    bcc_emails: List[str] = None, subject: str = "", body: str = "",
+                    attachment_path: Optional[str] = None) -> bool:
         """Send email via Outlook"""
         try:
+            # Validate attachment path before creating email
+            if attachment_path:
+                self.logger.info(f"Attempting to send email with attachment: {attachment_path}")
+
+                # Convert to absolute path to ensure Outlook can find it
+                abs_attachment_path = os.path.abspath(attachment_path)
+                self.logger.info(f"Absolute attachment path: {abs_attachment_path}")
+
+                # Check if attachment path exists and is accessible
+                if not os.path.exists(abs_attachment_path):
+                    self.logger.error(f"Attachment file does not exist: {abs_attachment_path}")
+                    return False
+
+                if not os.path.isfile(abs_attachment_path):
+                    self.logger.error(f"Attachment path is not a file: {abs_attachment_path}")
+                    return False
+
+                # Check file size (Outlook has limits)
+                try:
+                    file_size = os.path.getsize(abs_attachment_path)
+                    max_size = 25 * 1024 * 1024  # 25MB limit for Outlook
+                    if file_size > max_size:
+                        self.logger.error(f"Attachment file too large: {file_size} bytes (max: {max_size} bytes)")
+                        return False
+                    self.logger.info(f"Attachment file size: {file_size} bytes")
+                except OSError as e:
+                    self.logger.error(f"Cannot access attachment file: {str(e)}")
+                    return False
+
+                # Check if file is readable
+                try:
+                    with open(abs_attachment_path, 'rb') as f:
+                        f.read(1)  # Try to read at least one byte
+                except (PermissionError, OSError) as e:
+                    self.logger.error(f"Cannot read attachment file: {str(e)}")
+                    return False
+
+                # Use absolute path for Outlook
+                attachment_path = abs_attachment_path
+
             mail = self.outlook.CreateItem(0)  # 0 = olMailItem
 
             # Set recipients
@@ -48,10 +89,11 @@ class OutlookSender(EmailSenderBase):
             mail.Subject = subject
             mail.HTMLBody = body
 
-            # Add attachment if provided
-            if attachment_path and os.path.exists(attachment_path):
-                mail.Attachments.Add(attachment_path)
-                self.logger.info(f"Added attachment: {attachment_path}")
+            # Add attachment if provided and validated
+            if attachment_path:
+                if not self._add_attachment_with_retry(mail, attachment_path):
+                    # Try to continue without attachment
+                    self.logger.warning("Continuing to send email without attachment")
 
             # Send email
             mail.Send()
@@ -69,6 +111,41 @@ class OutlookSender(EmailSenderBase):
             return self.outlook is not None
         except:
             return False
+
+    def _add_attachment_with_retry(self, mail, attachment_path: str, max_retries: int = 3) -> bool:
+        """Add attachment to email with retry mechanism"""
+        for attempt in range(max_retries):
+            try:
+                # Try different path formats for Outlook
+                path_attempts = [
+                    attachment_path,  # Absolute path
+                    attachment_path.replace('/', '\\'),  # Windows path separators
+                    os.path.normpath(attachment_path),  # Normalized path
+                ]
+
+                for path_attempt in path_attempts:
+                    try:
+                        mail.Attachments.Add(path_attempt)
+                        self.logger.info(f"Successfully added attachment on attempt {attempt + 1} using path: {path_attempt}")
+                        return True
+                    except Exception as path_e:
+                        self.logger.debug(f"Failed with path {path_attempt}: {str(path_e)}")
+                        continue
+
+                # If all path formats failed, raise the last exception
+                raise Exception(f"All path formats failed for: {attachment_path}")
+
+            except Exception as e:
+                self.logger.warning(f"Failed to add attachment on attempt {attempt + 1}: {str(e)}")
+
+                if attempt < max_retries - 1:
+                    # Wait before retry (exponential backoff)
+                    wait_time = (2 ** attempt) * 0.5  # 0.5s, 1s, 2s
+                    self.logger.info(f"Retrying attachment in {wait_time} seconds...")
+                    time.sleep(wait_time)
+
+        self.logger.error(f"Failed to add attachment after {max_retries} attempts: {attachment_path}")
+        return False
 
 class ThunderbirdSender(EmailSenderBase):
     """Thunderbird/SMTP email sender"""
