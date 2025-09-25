@@ -27,6 +27,7 @@ from core.email_sender import EmailSenderFactory
 from core.template_engine import EmailTemplateEngine
 from utils.logger import setup_logger
 from utils.resources import get_resource_path
+from ui.smtp_config_dialog import SMTPConfigDialog
 
 class EmailAutomationWorker(QThread):
     """Worker thread for email automation"""
@@ -469,8 +470,12 @@ class MainWindow(FluentWindow):
         self.email_client_combo = ComboBox()
         self.email_client_combo.addItems(["outlook", "thunderbird", "smtp"])
         self.email_client_combo.setMinimumWidth(200)
+        self.smtp_config_btn = PushButton(FluentIcon.SETTING, "Set SMTP")
+        self.smtp_config_btn.setMinimumWidth(100)
+        self.smtp_config_btn.clicked.connect(self.open_smtp_config_dialog)
         client_grid.addWidget(client_label, 0, 0)
         client_grid.addWidget(self.email_client_combo, 0, 1)
+        client_grid.addWidget(self.smtp_config_btn, 0, 2)
         client_grid.setColumnStretch(1, 1)
         monitoring_layout.addLayout(client_grid)
 
@@ -1173,10 +1178,13 @@ class MainWindow(FluentWindow):
         self.scan_extensions_btn.clicked.connect(self.scan_monitor_folder_extensions)
         self.select_all_ext_btn.clicked.connect(self.select_all_extensions)
         self.clear_ext_btn.clicked.connect(self.clear_extensions_selection)
-        
+
         # Profile combo
         self.profile_combo.currentTextChanged.connect(self.load_profile_config)
-        
+
+        # Email client combo
+        self.email_client_combo.currentTextChanged.connect(self.on_email_client_changed)
+
         # Worker signals
         self.worker.file_processed.connect(self.on_file_processed)
         self.worker.error_occurred.connect(self.on_error_occurred)
@@ -1244,6 +1252,9 @@ class MainWindow(FluentWindow):
             self.custom1_value_edit.setText(config.get('custom1_value', ''))
             self.custom2_name_edit.setText(config.get('custom2_name', ''))
             self.custom2_value_edit.setText(config.get('custom2_value', ''))
+
+            # Update SMTP button visibility based on email client
+            self.on_email_client_changed()
 
             # Load email form fields
             email_form = config.get('email_form', {})
@@ -1559,10 +1570,10 @@ class MainWindow(FluentWindow):
             current_index = self.profile_combo.currentIndex()
             if current_index < 0 or current_index >= len(self.profile_names):
                 return
-            
+
             profile_name = self.profile_names[current_index]
 
-            # Get existing profile to preserve values not present in UI (e.g., file_extensions, subject_template)
+            # Get existing profile to preserve values not present in UI (e.g., file_extensions, subject_template, SMTP settings)
             existing = {}
             try:
                 existing = self.config_manager.get_profile_config(profile_name)
@@ -1594,10 +1605,10 @@ class MainWindow(FluentWindow):
                 # Templates
                 'subject_template': existing.get('subject_template', '[filename_without_ext]'),
                 'body_template': selected_template,
-                
+
                 # File extensions selected from UI (fallback to existing if none selected)
                 'file_extensions': (self.get_selected_extensions() or existing.get('file_extensions', [])),
-                
+
                 # Constant variables
                 'default_cc': self.default_cc_edit.text(),
                 'default_bcc': self.default_bcc_edit.text(),
@@ -1610,9 +1621,10 @@ class MainWindow(FluentWindow):
                 'email_form': email_form
             }
 
-            # Preserve 'name' if exists
-            if 'name' in existing:
-                config_data['name'] = existing['name']
+            # Preserve existing values that are not set by UI (SMTP settings, name, etc.)
+            for key, value in existing.items():
+                if key not in config_data:
+                    config_data[key] = value
 
             # Persist global database path and current profile
             db_path_text = self.database_path_edit.text().strip()
@@ -1623,7 +1635,7 @@ class MainWindow(FluentWindow):
             if tpl_dir_text:
                 self.config_manager.set_template_dir(tpl_dir_text)
             self.config_manager.set_current_profile(profile_name)
-            
+
             self.config_manager.save_profile_config(profile_name, config_data)
 
         except Exception as e:
@@ -2146,3 +2158,57 @@ class MainWindow(FluentWindow):
         if self.is_monitoring:
             self.stop_monitoring()
         event.accept()
+
+    def on_email_client_changed(self):
+        """Handle email client combo box change"""
+        client = self.email_client_combo.currentText()
+        # Show SMTP button only for smtp client (thunderbird uses SMTP but doesn't need separate config)
+        self.smtp_config_btn.setVisible(client == 'smtp')
+
+    def open_smtp_config_dialog(self):
+        """Open SMTP configuration dialog"""
+        try:
+            # Get current profile config to load existing SMTP settings
+            profile_config = self.config_manager.get_profile_config()
+
+            # Extract SMTP settings from profile config
+            smtp_config = {
+                'smtp_server': profile_config.get('smtp_server', ''),
+                'smtp_port': profile_config.get('smtp_port', 587),
+                'smtp_username': profile_config.get('smtp_username', ''),
+                'smtp_password': profile_config.get('smtp_password', ''),
+                'smtp_use_tls': profile_config.get('smtp_use_tls', True)
+            }
+
+            # Debug logging
+            self.logger.info(f"Loading SMTP config: {smtp_config}")
+
+            # Open dialog
+            dialog = SMTPConfigDialog(self, smtp_config)
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                # Save SMTP settings to profile config
+                new_smtp_config = dialog.get_config()
+
+                # Debug logging
+                self.logger.info(f"Saving SMTP config: {new_smtp_config}")
+
+                # Update profile config with new SMTP settings
+                profile_config.update(new_smtp_config)
+                self.config_manager.save_profile_config(
+                    self.config_manager.get_current_profile(),
+                    profile_config
+                )
+
+                InfoBar.success(
+                    title="SMTP Settings Saved",
+                    content="SMTP configuration has been saved successfully",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+
+        except Exception as e:
+            self.logger.error(f"Failed to open SMTP configuration dialog: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open SMTP configuration: {str(e)}")
