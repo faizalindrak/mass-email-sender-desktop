@@ -89,6 +89,8 @@ class NativeHost:
         if not self._acquire_process_lock():
             self.log("Another native host instance is already running, exiting...")
             sys.exit(0)
+        else:
+            self.log("Process lock acquired successfully")
         
         # Register cleanup on exit
         atexit.register(self._cleanup)
@@ -106,6 +108,18 @@ class NativeHost:
         """Acquire a file lock to ensure only one instance runs."""
         try:
             lock_path = os.path.join(self.queue_dir, "native_host.lock")
+            self.log(f"Attempting to acquire lock at: {lock_path}")
+            
+            # Check if we can write to the queue directory
+            try:
+                test_file = os.path.join(self.queue_dir, "test_write.tmp")
+                with open(test_file, 'w') as f:
+                    f.write("test")
+                os.remove(test_file)
+                self.log("Queue directory is writable")
+            except Exception as e:
+                self.log(f"ERROR: Cannot write to queue directory: {e}")
+                return False
             
             # Clean up any stale lock file first
             if os.path.exists(lock_path):
@@ -113,6 +127,8 @@ class NativeHost:
                     # Try to read PID from lock file
                     with open(lock_path, 'r') as f:
                         old_pid = int(f.read().strip())
+                    
+                    self.log(f"Found existing lock file with PID: {old_pid}")
                     
                     # Check if process is still running
                     try:
@@ -140,8 +156,9 @@ class NativeHost:
                             self.log(f"Removed stale lock file (PID {old_pid} not found)")
                         except:
                             pass
-                except (ValueError, OSError, FileNotFoundError):
+                except (ValueError, OSError, FileNotFoundError) as e:
                     # Invalid lock file, remove it
+                    self.log(f"Invalid lock file found, removing: {e}")
                     try:
                         os.remove(lock_path)
                         self.log("Removed invalid lock file")
@@ -149,7 +166,12 @@ class NativeHost:
                         pass
             
             # Try to create new lock file
-            self._lock_file = open(lock_path, 'w')
+            try:
+                self._lock_file = open(lock_path, 'w')
+                self.log(f"Created lock file successfully")
+            except Exception as e:
+                self.log(f"ERROR: Failed to create lock file: {e}")
+                return False
             
             if os.name == "nt":
                 # Windows file locking
@@ -158,14 +180,19 @@ class NativeHost:
                     msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                     self._lock_file.write(str(os.getpid()))
                     self._lock_file.flush()
-                    self.log(f"Acquired process lock (PID: {os.getpid()})")
+                    self.log(f"Acquired process lock with file locking (PID: {os.getpid()})")
                     return True
-                except (OSError, ImportError):
+                except (OSError, ImportError) as e:
+                    self.log(f"File locking failed, using fallback: {e}")
                     # Fallback: just write PID and hope for the best
-                    self._lock_file.write(str(os.getpid()))
-                    self._lock_file.flush()
-                    self.log(f"Acquired process lock without file locking (PID: {os.getpid()})")
-                    return True
+                    try:
+                        self._lock_file.write(str(os.getpid()))
+                        self._lock_file.flush()
+                        self.log(f"Acquired process lock without file locking (PID: {os.getpid()})")
+                        return True
+                    except Exception as e2:
+                        self.log(f"Fallback lock method also failed: {e2}")
+                        return False
             else:
                 # Unix file locking
                 try:
@@ -175,11 +202,14 @@ class NativeHost:
                     self._lock_file.flush()
                     self.log(f"Acquired process lock (PID: {os.getpid()})")
                     return True
-                except OSError:
+                except OSError as e:
+                    self.log(f"Unix file locking failed: {e}")
                     return False
                     
         except Exception as e:
             self.log(f"Failed to acquire process lock: {e}")
+            import traceback
+            self.log(f"Lock acquisition traceback: {traceback.format_exc()}")
             return False
     
     def _release_process_lock(self):
@@ -394,6 +424,46 @@ class NativeHost:
             if msg.get("type") == "hello":
                 self._connected = True
                 self.send_message({"type": "hello_ack", "ts": int(time.time())})
+                return
+            
+            # Handle file data request from extension
+            if msg.get("type") == "getFileData":
+                file_path = msg.get("filePath", "")
+                request_id = msg.get("id", "")
+                
+                if os.path.exists(file_path):
+                    try:
+                        import base64
+                        # Read file as base64
+                        with open(file_path, "rb") as f:
+                            file_data = base64.b64encode(f.read()).decode('utf-8')
+                        
+                        # Send file data back to extension
+                        self.send_message({
+                            "type": "fileDataResponse",
+                            "id": request_id,
+                            "success": True,
+                            "data": file_data,
+                            "name": os.path.basename(file_path),
+                            "size": os.path.getsize(file_path)
+                        })
+                        self.log(f"Sent file data for {file_path}")
+                    except Exception as e:
+                        self.log(f"Error reading file {file_path}: {e}")
+                        self.send_message({
+                            "type": "fileDataResponse",
+                            "id": request_id,
+                            "success": False,
+                            "error": str(e)
+                        })
+                else:
+                    self.log(f"File not found: {file_path}")
+                    self.send_message({
+                        "type": "fileDataResponse",
+                        "id": request_id,
+                        "success": False,
+                        "error": "File not found"
+                    })
                 return
 
             # Log other messages
