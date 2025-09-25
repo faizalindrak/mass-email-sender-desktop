@@ -1,0 +1,17 @@
+{
+  "namespace": "eSend",
+  "functions": [
+    {
+      "name": "sendNow",
+      "type": "function",
+      "description": "Programmatically trigger Send Now on the most recent compose window as a compatibility fallback.",
+      "parameters": [
+        {
+          "name": "tabId",
+          "type": "integer",
+          "description": "Compose tab id (best effort; implementation may target the most recent compose window if mapping is unavailable)."
+        }
+      ]
+    }
+  ]
+}

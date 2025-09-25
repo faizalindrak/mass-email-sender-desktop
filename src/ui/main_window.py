@@ -93,10 +93,21 @@ class EmailAutomationWorker(QThread):
                 body = f"Document {variables['filename']} untuk {supplier['supplier_name']}"
 
             # Create email sender
+            sender_kwargs = {k: v for k, v in profile_config.items() if k.startswith('smtp_')}
+            tbq = profile_config.get('tb_queue_dir') or profile_config.get('queue_dir')
+            if tbq:
+                sender_kwargs['tb_queue_dir'] = tbq
             email_sender = EmailSenderFactory.create_sender(
                 profile_config['email_client'],
-                **{k: v for k, v in profile_config.items() if k.startswith('smtp_')}
+                **sender_kwargs
             )
+            # Extra diagnostics for Thunderbird headless queue alignment
+            try:
+                if getattr(email_sender, '__class__', None).__name__ == 'ThunderbirdExtensionSender' or hasattr(email_sender, 'queue_dir'):
+                    qdir = getattr(email_sender, 'queue_dir', None)
+                    self.logger.info(f"Thunderbird queue dir resolved: {qdir}")
+            except Exception as _:
+                pass
 
             # Merge supplier CC/BCC with default CC/BCC from profile
             merged_cc = (supplier.get('cc_emails', []) or []) + default_cc_list
@@ -1926,10 +1937,21 @@ class MainWindow(FluentWindow):
             profile_config = self.config_manager.get_profile_config()
 
             # Create email sender
+            sender_kwargs = {k: v for k, v in profile_config.items() if k.startswith('smtp_')}
+            tbq = profile_config.get('tb_queue_dir') or profile_config.get('queue_dir')
+            if tbq:
+                sender_kwargs['tb_queue_dir'] = tbq
             email_sender = EmailSenderFactory.create_sender(
                 profile_config['email_client'],
-                **{k: v for k, v in profile_config.items() if k.startswith('smtp_')}
+                **sender_kwargs
             )
+            # Extra diagnostics for Thunderbird headless queue alignment (test email path)
+            try:
+                if getattr(email_sender, '__class__', None).__name__ == 'ThunderbirdExtensionSender' or hasattr(email_sender, 'queue_dir'):
+                    qdir = getattr(email_sender, 'queue_dir', None)
+                    self.logger.info(f"[Test Email] Thunderbird queue dir resolved: {qdir}")
+            except Exception as _:
+                pass
 
             # Send email
             success = email_sender.send_email(

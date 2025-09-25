@@ -7,6 +7,9 @@ from email import encoders
 import os
 import logging
 import time
+import sys
+import json
+import uuid
 from typing import List, Optional
 
 class EmailSenderBase:
@@ -147,8 +150,8 @@ class OutlookSender(EmailSenderBase):
         self.logger.error(f"Failed to add attachment after {max_retries} attempts: {attachment_path}")
         return False
 
-class ThunderbirdSender(EmailSenderBase):
-    """Thunderbird/SMTP email sender"""
+class SMTPSender(EmailSenderBase):
+    """SMTP email sender (generic, can be used with Thunderbird SMTP profile)"""
 
     def __init__(self, smtp_server: str, smtp_port: int, username: str, password: str, use_tls: bool = True):
         super().__init__()
@@ -222,6 +225,176 @@ class ThunderbirdSender(EmailSenderBase):
             self.logger.error(f"SMTP connection test failed: {str(e)}")
             return False
 
+class ThunderbirdExtensionSender(EmailSenderBase):
+    """Headless Thunderbird MailExtension sender using a filesystem job queue.
+
+    Workflow:
+    - Write a job JSON to {queue_dir}/jobs/{job_id}.json
+    - Wait for result JSON from native host/extension at {queue_dir}/results/{job_id}.json
+    Integration notes:
+    - The Thunderbird MailExtension should connect to a registered native host.
+    - The native host process watches the queue_dir and forwards jobs to the extension via native messaging.
+    - After the extension sends the email, it posts a result back to the native host, which writes the result file.
+    """
+
+    def __init__(self, queue_dir: Optional[str] = None, timeout_seconds: float = 120.0, poll_interval: float = 0.5):
+        super().__init__()
+        self.timeout_seconds = float(timeout_seconds)
+        self.poll_interval = float(poll_interval)
+    
+        # Resolution order for queue directory:
+        # 1) Explicit argument queue_dir (profile 'tb_queue_dir')
+        # 2) Environment variable TB_QUEUE_DIR
+        # 3) OS default
+        env_qdir = os.environ.get("TB_QUEUE_DIR", "").strip()
+        if queue_dir and isinstance(queue_dir, str) and queue_dir.strip():
+            base_queue_dir = queue_dir
+        elif env_qdir:
+            base_queue_dir = env_qdir
+        else:
+            base_queue_dir = self._default_queue_dir()
+    
+        # Normalize and create folders
+        self.queue_dir = os.path.abspath(base_queue_dir)
+        self.jobs_dir = os.path.join(self.queue_dir, "jobs")
+        self.results_dir = os.path.join(self.queue_dir, "results")
+    
+        os.makedirs(self.jobs_dir, exist_ok=True)
+        os.makedirs(self.results_dir, exist_ok=True)
+    
+        self.logger.info(f"ThunderbirdExtensionSender queue initialized at: {self.queue_dir}")
+        self.logger.info(f"Jobs dir: {self.jobs_dir}")
+        self.logger.info(f"Results dir: {self.results_dir}")
+
+    def _default_queue_dir(self) -> str:
+        """Compute a sensible default queue directory.
+        
+        Preference order:
+        1) Project-local tb_queue (next to this repository), to keep app/host aligned without extra config
+        2) OS-specific roaming path
+        3) CWD tb_queue fallback
+        """
+        try:
+            # Prefer project-local tb_queue based on repository root (src/core/ -> project root)
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            local_q = os.path.join(project_root, "tb_queue")
+            try:
+                os.makedirs(os.path.join(local_q, "jobs"), exist_ok=True)
+                os.makedirs(os.path.join(local_q, "results"), exist_ok=True)
+                return local_q
+            except Exception:
+                # If cannot create local queue, fall back to OS path below
+                pass
+            
+            # OS-specific roaming path
+            if os.name == "nt":
+                # Windows: %APPDATA%\\EmailAutomation\\tb_queue
+                appdata = os.getenv("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+                return os.path.join(appdata, "EmailAutomation", "tb_queue")
+            else:
+                # Linux/macOS: ~/.local/share/email_automation/tb_queue (Linux) or ~/Library/Application Support/... (macOS)
+                if sys.platform == "darwin":
+                    base = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "EmailAutomation")
+                else:
+                    base = os.path.join(os.path.expanduser("~"), ".local", "share", "email_automation")
+                return os.path.join(base, "tb_queue")
+        except Exception:
+            # Fallback to project-local folder if anything goes wrong
+            return os.path.abspath(os.path.join("tb_queue"))
+
+    def send_email(
+        self,
+        to_emails: List[str],
+        cc_emails: List[str] = None,
+        bcc_emails: List[str] = None,
+        subject: str = "",
+        body: str = "",
+        attachment_path: Optional[str] = None
+    ) -> bool:
+        """Queue an email send job and wait for the MailExtension result."""
+        try:
+            job_id = str(uuid.uuid4())
+
+            # Normalize lists
+            to_emails = to_emails or []
+            cc_emails = cc_emails or []
+            bcc_emails = bcc_emails or []
+
+            # Validate/normalize attachment
+            attachments = []
+            if attachment_path:
+                abs_attachment = os.path.abspath(attachment_path)
+                if not os.path.exists(abs_attachment):
+                    self.logger.error(f"Attachment file does not exist: {abs_attachment}")
+                    return False
+                if not os.path.isfile(abs_attachment):
+                    self.logger.error(f"Attachment path is not a file: {abs_attachment}")
+                    return False
+                attachments.append({"path": abs_attachment})
+
+            job = {
+                "id": job_id,
+                "type": "sendEmail",
+                "payload": {
+                    "to": to_emails,
+                    "cc": cc_emails,
+                    "bcc": bcc_emails,
+                    "subject": subject,
+                    "bodyHtml": body or "",
+                    "attachments": attachments
+                },
+                "meta": {
+                    "createdAt": int(time.time()),
+                    "client": "email_automation_desktop"
+                }
+            }
+
+            job_path = os.path.join(self.jobs_dir, f"{job_id}.json")
+            result_path = os.path.join(self.results_dir, f"{job_id}.json")
+
+            # Best-effort cleanup of stale result file if exists
+            try:
+                if os.path.exists(result_path):
+                    os.remove(result_path)
+            except Exception:
+                pass
+
+            # Write job file
+            with open(job_path, "w", encoding="utf-8") as f:
+                json.dump(job, f, ensure_ascii=False, indent=2)
+
+            self.logger.info(f"Queued Thunderbird job: {job_path}")
+            self.logger.info(f"Waiting for result: {result_path} (timeout {self.timeout_seconds}s, interval {self.poll_interval}s)")
+    
+            # Wait for result
+            deadline = time.time() + self.timeout_seconds
+            while time.time() < deadline:
+                if os.path.exists(result_path):
+                    try:
+                        with open(result_path, "r", encoding="utf-8") as f:
+                            result = json.load(f)
+                        success = bool(result.get("success", False))
+                        err = result.get("error")
+                        if success:
+                            self.logger.info("Thunderbird MailExtension reported success.")
+                            return True
+                        else:
+                            self.logger.error(f"Thunderbird MailExtension reported failure: {err}")
+                            return False
+                    except Exception as e:
+                        self.logger.warning(f"Result file read error, retrying: {e}")
+                        # Small delay to avoid busy loop if partial write
+                        time.sleep(self.poll_interval)
+                        continue
+    
+                time.sleep(self.poll_interval)
+    
+            self.logger.error(f"Timed out waiting for Thunderbird MailExtension result. Queue dir: {self.queue_dir}")
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to enqueue Thunderbird MailExtension job: {str(e)}")
+            return False
 class EmailSenderFactory:
     """Factory for creating email senders"""
 
@@ -232,8 +405,13 @@ class EmailSenderFactory:
         client = client_type.lower()
         if client == 'outlook':
             return OutlookSender()
-
-        elif client in ('thunderbird', 'smtp'):
+        
+        elif client == 'thunderbird':
+            # Use Thunderbird MailExtension via native messaging queue (headless, no SMTP required)
+            queue_dir = kwargs.get('tb_queue_dir') or kwargs.get('queue_dir')
+            return ThunderbirdExtensionSender(queue_dir=queue_dir)
+        
+        elif client == 'smtp':
             # Normalize kwargs to support both profile keys (smtp_*) and generic keys
             smtp_server = kwargs.get('smtp_server') or kwargs.get('server')
             smtp_port = kwargs.get('smtp_port') or kwargs.get('port')
@@ -242,25 +420,25 @@ class EmailSenderFactory:
             use_tls = kwargs.get('smtp_use_tls')
             if use_tls is None:
                 use_tls = kwargs.get('use_tls', True)
-
+        
             missing = [name for name, val in [
                 ('smtp_server', smtp_server),
                 ('smtp_port', smtp_port),
                 ('username', username),
                 ('password', password),
             ] if val in (None, '')]
-
+        
             if missing:
                 raise ValueError(f"Missing required parameter for SMTP: {', '.join(missing)}")
-
-            return ThunderbirdSender(
+        
+            return SMTPSender(
                 smtp_server=str(smtp_server),
                 smtp_port=int(smtp_port),
                 username=str(username),
                 password=str(password),
                 use_tls=bool(use_tls)
             )
-
+        
         else:
             raise ValueError(f"Unsupported email client type: {client_type}")
 

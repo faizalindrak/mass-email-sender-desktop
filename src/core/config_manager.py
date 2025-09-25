@@ -57,6 +57,7 @@ class ConfigManager:
             "sent_folder": "sent",
             "key_pattern": "([A-Z]{2}\\d{3})",
             "email_client": "outlook",
+            "tb_queue_dir": "",  # Optional: queue dir for Thunderbird MailExtension mode
             "subject_template": "[filename_without_ext]",
             "body_template": "default_template.html",
             "auto_start": False,
@@ -233,22 +234,28 @@ class ConfigManager:
 
         # Validate email client
         valid_clients = ["outlook", "thunderbird", "smtp"]
-        if str(config_data["email_client"]).lower() not in valid_clients:
+        client_lower = str(config_data["email_client"]).lower()
+        if client_lower not in valid_clients:
             return False, f"Invalid email client. Must be one of: {', '.join(valid_clients)}"
-
-        # Validate SMTP settings if using thunderbird/smtp
-        if str(config_data["email_client"]).lower() in ["thunderbird", "smtp"]:
+        
+        # Validate settings by client
+        if client_lower == "smtp":
             smtp_required = ["smtp_server", "smtp_port", "smtp_username", "smtp_password"]
             for field in smtp_required:
                 if field not in config_data or not config_data[field]:
-                    return False, f"SMTP field '{field}' is required for thunderbird/smtp client"
-
+                    return False, f"SMTP field '{field}' is required for smtp client"
+        elif client_lower == "thunderbird":
+            # MailExtension headless mode does not require SMTP settings.
+            # Optional: validate tb_queue_dir type if provided.
+            if "tb_queue_dir" in config_data and config_data["tb_queue_dir"] and not isinstance(config_data["tb_queue_dir"], str):
+                return False, "tb_queue_dir must be a string path when provided"
+        
         # Validate regex pattern
         try:
             re.compile(config_data["key_pattern"])
         except re.error as e:
             return False, f"Invalid regex pattern: {str(e)}"
-
+        
         return True, "Configuration is valid"
 
     def export_profile(self, profile_name: str, export_path: str):

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 2,
+  "name": "Email Automation Bridge",
+  "description": "Headless bridge to send emails via Thunderbird using native messaging.",
+  "version": "1.2.1",
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "permissions": [
+    "compose",
+    "messagesRead",
+    "accountsRead",
+    "nativeMessaging",
+    "tabs"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "email-automation@local",
+      "strict_min_version": "78.0"
+    }
+  },
+  "applications": {
+    "gecko": {
+      "id": "email-automation@local",
+      "strict_min_version": "78.0"
+    }
+  },
+  "experiment_apis": {
+    "eSend": {
+      "schema": "experiment/send/schema.json",
+      "parent": {
+        "scopes": ["addon_parent"],
+        "paths": [["eSend"]],
+        "script": "experiment/send/implementation.js"
+      }
+    }
+  }
+}
