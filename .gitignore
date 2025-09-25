@@ -11,3 +11,5 @@ database/import.csv
 database/mydb.db
 logs/app.log
 templates/default_template.html
+database/db_import.csv
+logs/app.log
