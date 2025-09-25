@@ -12,56 +12,37 @@ import threading
 import time
 import traceback
 import subprocess
-import atexit
-import signal
 from typing import Dict, Any, Optional
 
 # Ensure we're in the correct directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, script_dir)
 
+# Import the original NativeHost as base
+try:
+    from native_host import Logger, default_queue_dir
+except ImportError:
+    # Fallback logger if import fails
+    class Logger:
+        def __init__(self, queue_dir: str):
+            self._log_path = os.path.join(queue_dir, "native_host.log")
+        
+        def log(self, *args):
+            msg = "[TB-NativeHost-Robust] " + " ".join(str(a) for a in args)
+            try:
+                with open(self._log_path, "a", encoding="utf-8") as f:
+                    f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg + "\n")
+            except:
+                pass
+    
+    def default_queue_dir():
+        return os.path.abspath("tb_queue")
+
 HOST_NAME = "com.emailautomation.tbhost"
 DEFAULT_POLL_INTERVAL = 0.5
 DEFAULT_TIMEOUT_SECONDS = 120.0
 
-def default_queue_dir() -> str:
-    try:
-        if os.name == "nt":
-            appdata = os.getenv("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
-            return os.path.join(appdata, "EmailAutomation", "tb_queue")
-        else:
-            if sys.platform == "darwin":
-                base = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "EmailAutomation")
-            else:
-                base = os.path.join(os.path.expanduser("~"), ".local", "share", "email_automation")
-            return os.path.join(base, "tb_queue")
-    except Exception:
-        return os.path.abspath(os.path.join("tb_queue"))
-
-class Logger:
-    def __init__(self, queue_dir: str):
-        self._lock = threading.Lock()
-        self._log_path = os.path.join(queue_dir, "native_host.log")
-        try:
-            os.makedirs(queue_dir, exist_ok=True)
-        except Exception:
-            pass
-
-    def log(self, *args):
-        msg = "[TB-NativeHost-Robust] " + " ".join(str(a) for a in args)
-        try:
-            with self._lock:
-                with open(self._log_path, "a", encoding="utf-8") as f:
-                    f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg + "\n")
-        except Exception:
-            # Fallback to stderr
-            try:
-                sys.stderr.write(msg + "\n")
-                sys.stderr.flush()
-            except Exception:
-                pass
-
-class NativeHost:
+class RobustNativeHost:
     """Robust native messaging host with better Windows stdio handling."""
     
     def __init__(self, queue_dir: Optional[str] = None, poll_interval: float = DEFAULT_POLL_INTERVAL):
@@ -83,129 +64,9 @@ class NativeHost:
         self._connected = False
         self._last_send_error = None
         self._inflight = {}
-        self._lock_file = None
-        
-        # Try to acquire process lock to prevent multiple instances
-        if not self._acquire_process_lock():
-            self.log("Another native host instance is already running, exiting...")
-            sys.exit(0)
-        
-        # Register cleanup on exit
-        atexit.register(self._cleanup)
-        try:
-            signal.signal(signal.SIGTERM, self._signal_handler)
-            signal.signal(signal.SIGINT, self._signal_handler)
-        except ValueError:
-            # Signals not available in all contexts
-            pass
         
         # Setup robust stdio handling
         self._setup_robust_stdio()
-    
-    def _acquire_process_lock(self) -> bool:
-        """Acquire a file lock to ensure only one instance runs."""
-        try:
-            lock_path = os.path.join(self.queue_dir, "native_host.lock")
-            
-            # Clean up any stale lock file first
-            if os.path.exists(lock_path):
-                try:
-                    # Try to read PID from lock file
-                    with open(lock_path, 'r') as f:
-                        old_pid = int(f.read().strip())
-                    
-                    # Check if process is still running
-                    try:
-                        if os.name == "nt":
-                            # Windows: check if process exists
-                            import subprocess
-                            result = subprocess.run(['tasklist', '/FI', f'PID eq {old_pid}'],
-                                                 capture_output=True, text=True, timeout=5)
-                            if str(old_pid) not in result.stdout:
-                                # Process not running, remove stale lock
-                                os.remove(lock_path)
-                                self.log(f"Removed stale lock file (PID {old_pid} not running)")
-                            else:
-                                self.log(f"Process {old_pid} is still running, cannot start")
-                                return False
-                        else:
-                            # Unix: send signal 0 to check if process exists
-                            os.kill(old_pid, 0)
-                            self.log(f"Process {old_pid} is still running, cannot start")
-                            return False
-                    except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
-                        # Process doesn't exist, remove stale lock
-                        try:
-                            os.remove(lock_path)
-                            self.log(f"Removed stale lock file (PID {old_pid} not found)")
-                        except:
-                            pass
-                except (ValueError, OSError, FileNotFoundError):
-                    # Invalid lock file, remove it
-                    try:
-                        os.remove(lock_path)
-                        self.log("Removed invalid lock file")
-                    except:
-                        pass
-            
-            # Try to create new lock file
-            self._lock_file = open(lock_path, 'w')
-            
-            if os.name == "nt":
-                # Windows file locking
-                try:
-                    import msvcrt
-                    msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-                    self._lock_file.write(str(os.getpid()))
-                    self._lock_file.flush()
-                    self.log(f"Acquired process lock (PID: {os.getpid()})")
-                    return True
-                except (OSError, ImportError):
-                    # Fallback: just write PID and hope for the best
-                    self._lock_file.write(str(os.getpid()))
-                    self._lock_file.flush()
-                    self.log(f"Acquired process lock without file locking (PID: {os.getpid()})")
-                    return True
-            else:
-                # Unix file locking
-                try:
-                    import fcntl
-                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    self._lock_file.write(str(os.getpid()))
-                    self._lock_file.flush()
-                    self.log(f"Acquired process lock (PID: {os.getpid()})")
-                    return True
-                except OSError:
-                    return False
-                    
-        except Exception as e:
-            self.log(f"Failed to acquire process lock: {e}")
-            return False
-    
-    def _release_process_lock(self):
-        """Release the process lock."""
-        try:
-            if self._lock_file:
-                self._lock_file.close()
-                self._lock_file = None
-            
-            lock_path = os.path.join(self.queue_dir, "native_host.lock")
-            if os.path.exists(lock_path):
-                os.remove(lock_path)
-                self.log("Released process lock")
-        except Exception as e:
-            self.log(f"Error releasing lock: {e}")
-    
-    def _cleanup(self):
-        """Cleanup function called on exit."""
-        self._stop.set()
-        self._release_process_lock()
-    
-    def _signal_handler(self, signum, frame):
-        """Handle signals for graceful shutdown."""
-        self.log(f"Received signal {signum}, shutting down...")
-        self._cleanup()
-        sys.exit(0)
     
     def _setup_robust_stdio(self):
         """Setup robust stdio handling for Windows native messaging."""
@@ -214,56 +75,48 @@ class NativeHost:
             
             # For Windows, ensure we have proper binary streams
             if os.name == "nt":
+                import msvcrt
+                
+                # Get the raw file descriptors
+                stdin_fd = sys.stdin.fileno()
+                stdout_fd = sys.stdout.fileno()
+                
+                self.log(f"Original stdin fd: {stdin_fd}, stdout fd: {stdout_fd}")
+                
+                # Set binary mode on the file descriptors
                 try:
-                    import msvcrt
-                    
-                    # Get the raw file descriptors
-                    stdin_fd = sys.stdin.fileno()
-                    stdout_fd = sys.stdout.fileno()
-                    
-                    self.log(f"Original stdin fd: {stdin_fd}, stdout fd: {stdout_fd}")
-                    
-                    # Set binary mode on the file descriptors
-                    try:
-                        msvcrt.setmode(stdin_fd, os.O_BINARY)
-                        msvcrt.setmode(stdout_fd, os.O_BINARY)
-                        self.log("Successfully set binary mode on stdio")
-                    except Exception as e:
-                        self.log(f"Failed to set binary mode: {e}")
-                    
-                    # Don't create new file descriptor streams - use direct os.read/os.write instead
-                    # This avoids conflicts with Python's existing stdio streams
-                    self._stdin_fd = stdin_fd
-                    self._stdout_fd = stdout_fd
-                    self._stdin_raw = None  # We'll use os.read directly
-                    self._stdout_raw = None  # We'll use os.write directly
-                    self.log("Will use direct os.read/os.write for stdio")
-                except ImportError:
-                    self.log("msvcrt not available, using fallback")
-                    self._stdin_fd = sys.stdin.fileno()
-                    self._stdout_fd = sys.stdout.fileno()
-                    self._stdin_raw = None
-                    self._stdout_raw = None
+                    msvcrt.setmode(stdin_fd, os.O_BINARY)
+                    msvcrt.setmode(stdout_fd, os.O_BINARY)
+                    self.log("Successfully set binary mode on stdio")
+                except Exception as e:
+                    self.log(f"Failed to set binary mode: {e}")
+                
+                # Create our own binary streams using the file descriptors
+                try:
+                    self._stdin_raw = os.fdopen(stdin_fd, 'rb', buffering=0)
+                    self._stdout_raw = os.fdopen(stdout_fd, 'wb', buffering=0)
+                    self.log("Created raw binary streams")
+                except Exception as e:
+                    self.log(f"Failed to create raw streams: {e}")
+                    # Fallback to system streams
+                    self._stdin_raw = sys.stdin.buffer if hasattr(sys.stdin, 'buffer') else sys.stdin
+                    self._stdout_raw = sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else sys.stdout
             else:
-                # Non-Windows platforms - use direct file descriptors too
-                self._stdin_fd = sys.stdin.fileno()
-                self._stdout_fd = sys.stdout.fileno()
-                self._stdin_raw = None
-                self._stdout_raw = None
+                # Non-Windows platforms
+                self._stdin_raw = sys.stdin.buffer if hasattr(sys.stdin, 'buffer') else sys.stdin
+                self._stdout_raw = sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else sys.stdout
                 
         except Exception as e:
             self.log(f"Error setting up stdio: {e}")
             # Final fallback
-            self._stdin_fd = 0
-            self._stdout_fd = 1
-            self._stdin_raw = None
-            self._stdout_raw = None
+            self._stdin_raw = sys.stdin
+            self._stdout_raw = sys.stdout
     
     def read_message(self) -> Optional[dict]:
-        """Read a native messaging message using direct os.read."""
+        """Read a native messaging message with robust error handling."""
         try:
-            # Read the 4-byte length prefix using os.read
-            raw_length = os.read(self._stdin_fd, 4)
+            # Read the 4-byte length prefix
+            raw_length = self._stdin_raw.read(4)
             if not raw_length or len(raw_length) < 4:
                 return None
             
@@ -272,18 +125,10 @@ class NativeHost:
                 self.log(f"Invalid message length: {message_length}")
                 return None
             
-            # Read the message data using os.read
-            data = b""
-            bytes_to_read = message_length
-            while bytes_to_read > 0:
-                chunk = os.read(self._stdin_fd, bytes_to_read)
-                if not chunk:
-                    break
-                data += chunk
-                bytes_to_read -= len(chunk)
-            
-            if len(data) != message_length:
-                self.log(f"Incomplete message read: expected {message_length}, got {len(data)}")
+            # Read the message data
+            data = self._stdin_raw.read(message_length)
+            if not data or len(data) != message_length:
+                self.log(f"Incomplete message read: expected {message_length}, got {len(data) if data else 0}")
                 return None
             
             # Parse JSON
@@ -297,30 +142,27 @@ class NativeHost:
                 self.log(f"JSON decode error: {repr(je)}")
                 return None
                 
-        except (OSError, IOError) as e:
-            # Handle specific os.read errors
-            if e.errno == 9:  # Bad file descriptor
-                self.log("stdin file descriptor closed")
-                return None
-            self.log("read_message os.read error:", repr(e))
-            return None
         except Exception as e:
             self.log("read_message error:", repr(e))
             return None
     
     def send_message(self, msg: dict) -> bool:
-        """Send a native messaging message using direct os.write."""
+        """Send a native messaging message with robust error handling."""
         try:
             encoded = json.dumps(msg, ensure_ascii=False).encode("utf-8")
             length_data = struct.pack("<I", len(encoded))
             
             self.log(f"Sending message (length: {len(encoded)})")
             
-            # Use os.write directly - this has been working reliably
-            os.write(self._stdout_fd, length_data)
-            os.write(self._stdout_fd, encoded)
+            # Write directly to the raw stdout stream
+            self._stdout_raw.write(length_data)
+            self._stdout_raw.write(encoded)
             
-            self.log("Message sent via os.write")
+            # Ensure data is flushed
+            if hasattr(self._stdout_raw, 'flush'):
+                self._stdout_raw.flush()
+            
+            self.log("Message sent successfully")
             self._last_send_error = None
             return True
             
@@ -465,13 +307,9 @@ class NativeHost:
                         break
 
                 if not moved:
-                    # Process in place if we can't move
-                    if os.path.exists(job_path):
-                        processing_path = job_path
-                        self.log("Processing job in-place")
-                    else:
-                        self.log("Job file disappeared, skipping")
-                        continue
+                    # Process in place
+                    processing_path = job_path
+                    self.log("Processing job in-place")
 
                 # Prepare message
                 job_type = job.get("type") or "sendEmail"
@@ -492,10 +330,8 @@ class NativeHost:
                     
                     # Cleanup
                     try:
-                        if processing_path != job_path and processing_path and os.path.exists(processing_path):
+                        if processing_path and os.path.exists(processing_path):
                             os.remove(processing_path)
-                        elif processing_path == job_path and os.path.exists(job_path):
-                            os.remove(job_path)
                     except Exception:
                         pass
                     continue
@@ -536,7 +372,7 @@ class NativeHost:
         except Exception:
             self.log("Main loop exception:", traceback.format_exc())
         finally:
-            self._cleanup()
+            self._stop.set()
             self.log("Robust Native Host stopping.")
 
 def main():
@@ -548,7 +384,7 @@ def main():
         else:
             queue_dir = os.getenv("TB_QUEUE_DIR")
         
-        host = NativeHost(queue_dir=queue_dir)
+        host = RobustNativeHost(queue_dir=queue_dir)
         host.run()
         
     except KeyboardInterrupt:

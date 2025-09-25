@@ -1,0 +1,7 @@
+{
+  "name": "com.emailautomation.tbhost",
+  "description": "Email Automation native host for Thunderbird",
+  "path": "d:\\projects\\mass-email-sender-desktop\\thunderbird_extension\\native_host_launcher.bat",
+  "type": "stdio",
+  "allowed_extensions": ["email-automation@local"]
+}
