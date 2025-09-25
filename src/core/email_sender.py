@@ -9,6 +9,7 @@ import logging
 import time
 import platform
 import subprocess
+import tempfile
 from typing import List, Optional
 
 class EmailSenderBase:
@@ -487,101 +488,96 @@ class ThunderbirdProfileManager:
         return "sender@example.com"
 
 class ThunderbirdSender(EmailSenderBase):
-    """Thunderbird/SMTP email sender with hybrid approach for email history"""
+    """Thunderbird email sender using WebExtension API"""
 
-    def __init__(self, smtp_server: str, smtp_port: int, username: str, password: str,
-                 use_tls: bool = True, thunderbird_profile: Optional[str] = None,
-                 save_to_thunderbird: bool = True):
+    def __init__(self, extension_client=None, thunderbird_profile: Optional[str] = None,
+                  save_to_thunderbird: bool = True):
         super().__init__()
-        self.smtp_server = smtp_server
-        self.smtp_port = smtp_port
-        self.username = username
-        self.password = password
-        self.use_tls = use_tls
+        self.extension_client = extension_client
         self.thunderbird_profile = thunderbird_profile
         self.save_to_thunderbird = save_to_thunderbird
         # Always create manager for auto-detection if profile not specified
         self.thunderbird_manager = ThunderbirdProfileManager(thunderbird_profile)
+        self.logger = logging.getLogger(__name__)
 
     def send_email(self, to_emails: List[str], cc_emails: List[str] = None,
                     bcc_emails: List[str] = None, subject: str = "", body: str = "",
                     attachment_path: Optional[str] = None) -> bool:
-        """Send email via SMTP and save to Thunderbird (hybrid approach)"""
+        """Send email via Thunderbird WebExtension"""
         try:
-            # Step 1: Send via SMTP
-            smtp_success = self._send_via_smtp(to_emails, cc_emails, bcc_emails,
-                                             subject, body, attachment_path)
+            # Log attachment information for debugging
+            if attachment_path:
+                self.logger.info(f"Attempting to send email with attachment: {attachment_path}")
+                if os.path.exists(attachment_path):
+                    self.logger.info(f"File exists: {os.path.exists(attachment_path)}")
+                    self.logger.info(f"File is file: {os.path.isfile(attachment_path)}")
+                    self.logger.info(f"File size: {os.path.getsize(attachment_path)}")
+                else:
+                    self.logger.error(f"Attachment file does not exist: {attachment_path}")
 
-            if not smtp_success:
-                self.logger.error("SMTP sending failed, aborting hybrid approach")
+            # Check if WebExtension is available
+            if not self.extension_client:
+                self.logger.error("Thunderbird WebExtension client not initialized")
+                self.logger.info("This usually means the WebExtension is not installed or the Python client failed to initialize")
                 return False
 
-            # Step 2: Save to Thunderbird Sent folder if enabled
-            if self.save_to_thunderbird and self.thunderbird_manager:
-                thunderbird_success = self._save_to_thunderbird_sent(
-                    to_emails, cc_emails, bcc_emails, subject, body, attachment_path
+            if not self.extension_client.is_connected():
+                self.logger.error("Thunderbird WebExtension not connected")
+                self.logger.info("DIAGNOSTIC: WebExtension connection failed")
+                self.logger.info("Please check:")
+                self.logger.info("1. Is the Thunderbird WebExtension installed?")
+                self.logger.info("2. Is Thunderbird running with the extension loaded?")
+                self.logger.info("3. Is the WebSocket server running on port 8765?")
+                self.logger.info("4. Are there any firewall blocking port 8765?")
+                return False
+
+            self.logger.info("Thunderbird WebExtension is connected, proceeding with email send")
+
+            # Prepare email data
+            email_data = {
+                'to': to_emails,
+                'cc': cc_emails or [],
+                'bcc': bcc_emails or [],
+                'subject': subject,
+                'body': body,
+                'attachmentPath': attachment_path,
+                'attachmentName': os.path.basename(attachment_path) if attachment_path else None
+            }
+
+            # Send via WebExtension
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                result = loop.run_until_complete(
+                    self.extension_client.send_email(email_data)
                 )
 
-                if not thunderbird_success:
-                    self.logger.warning("Failed to save email to Thunderbird Sent folder, but SMTP was successful")
+                if result.get('success'):
+                    self.logger.info(f"Email sent successfully via WebExtension to {', '.join(to_emails)}")
 
-            self.logger.info(f"Email sent successfully via hybrid approach to {', '.join(to_emails)}")
-            return True
+                    # Save to Thunderbird Sent folder if enabled
+                    if self.save_to_thunderbird and self.thunderbird_manager:
+                        thunderbird_success = self._save_to_thunderbird_sent(
+                            to_emails, cc_emails, bcc_emails, subject, body, attachment_path
+                        )
 
-        except Exception as e:
-            self.logger.error(f"Failed to send email via hybrid approach: {str(e)}")
-            return False
+                        if not thunderbird_success:
+                            self.logger.warning("Failed to save email to Thunderbird Sent folder, but WebExtension sending was successful")
 
-    def _send_via_smtp(self, to_emails: List[str], cc_emails: List[str] = None,
-                      bcc_emails: List[str] = None, subject: str = "", body: str = "",
-                      attachment_path: Optional[str] = None) -> bool:
-        """Send email via SMTP"""
-        try:
-            # Create message
-            msg = MIMEMultipart()
-            msg['From'] = self.username
-            msg['To'] = ', '.join(to_emails)
-            if cc_emails:
-                msg['Cc'] = ', '.join(cc_emails)
-            msg['Subject'] = subject
+                    return True
+                else:
+                    self.logger.error(f"WebExtension sending failed: {result.get('error')}")
+                    return False
 
-            # Add body
-            msg.attach(MIMEText(body, 'html'))
-
-            # Add attachment if provided
-            if attachment_path and os.path.exists(attachment_path):
-                with open(attachment_path, "rb") as attachment:
-                    part = MIMEBase('application', 'octet-stream')
-                    part.set_payload(attachment.read())
-                    encoders.encode_base64(part)
-                    part.add_header(
-                        'Content-Disposition',
-                        f'attachment; filename= {os.path.basename(attachment_path)}'
-                    )
-                    msg.attach(part)
-                self.logger.info(f"Added attachment: {attachment_path}")
-
-            # Connect to server and send
-            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-
-            if self.use_tls:
-                server.starttls()
-
-            server.login(self.username, self.password)
-
-            # Get all recipients
-            all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
-
-            # Send email
-            server.sendmail(self.username, all_recipients, msg.as_string())
-            server.quit()
-
-            self.logger.info(f"Email sent successfully via SMTP to {', '.join(to_emails)}")
-            return True
+            finally:
+                loop.close()
 
         except Exception as e:
-            self.logger.error(f"Failed to send email via SMTP: {str(e)}")
+            self.logger.error(f"Failed to send email via WebExtension: {str(e)}")
             return False
+
 
     def _save_to_thunderbird_sent(self, to_emails: List[str], cc_emails: List[str] = None,
                                  bcc_emails: List[str] = None, subject: str = "",
@@ -601,16 +597,21 @@ class ThunderbirdSender(EmailSenderBase):
             return False
 
     def test_connection(self) -> bool:
-        """Test SMTP connection"""
+        """Test WebExtension connection"""
         try:
-            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-            if self.use_tls:
-                server.starttls()
-            server.login(self.username, self.password)
-            server.quit()
-            return True
+            if self.extension_client:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+                try:
+                    available = loop.run_until_complete(self.extension_client.check_availability())
+                    return available
+                finally:
+                    loop.close()
+            return False
         except Exception as e:
-            self.logger.error(f"SMTP connection test failed: {str(e)}")
+            self.logger.error(f"WebExtension connection test failed: {str(e)}")
             return False
 
 class EmailSenderFactory:
@@ -625,35 +626,22 @@ class EmailSenderFactory:
             return OutlookSender()
 
         elif client in ('thunderbird', 'smtp', 'thunderbird smtp'):
-            # Normalize kwargs to support both profile keys (smtp_*) and generic keys
-            smtp_server = kwargs.get('smtp_server') or kwargs.get('server')
-            smtp_port = kwargs.get('smtp_port') or kwargs.get('port')
-            username = kwargs.get('smtp_username') or kwargs.get('username')
-            password = kwargs.get('smtp_password') or kwargs.get('password')
-            use_tls = kwargs.get('smtp_use_tls')
-            if use_tls is None:
-                use_tls = kwargs.get('use_tls', True)
-
             # Thunderbird-specific parameters
             thunderbird_profile = kwargs.get('thunderbird_profile')
             save_to_thunderbird = kwargs.get('save_to_thunderbird', True)
 
-            missing = [name for name, val in [
-                ('smtp_server', smtp_server),
-                ('smtp_port', smtp_port),
-                ('username', username),
-                ('password', password),
-            ] if val in (None, '')]
-
-            if missing:
-                raise ValueError(f"Missing required parameter for SMTP: {', '.join(missing)}")
+            # Try to create WebExtension client
+            try:
+                from .thunderbird_extension_client import ThunderbirdExtensionClient
+                extension_client = ThunderbirdExtensionClient()
+                # Start websocket server for communication
+                extension_client.start_websocket_server()
+            except Exception as e:
+                logging.warning(f"Failed to create WebExtension client: {str(e)}")
+                extension_client = None
 
             return ThunderbirdSender(
-                smtp_server=str(smtp_server),
-                smtp_port=int(smtp_port),
-                username=str(username),
-                password=str(password),
-                use_tls=bool(use_tls),
+                extension_client=extension_client,
                 thunderbird_profile=thunderbird_profile,
                 save_to_thunderbird=bool(save_to_thunderbird)
             )

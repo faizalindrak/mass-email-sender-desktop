@@ -7,7 +7,7 @@ Aplikasi desktop untuk mengirim email secara otomatis dengan monitoring folder, 
 - **Folder Monitoring**: Otomatis detect file baru dengan watchdog
 - **Key Extraction**: Extract key dari filename menggunakan regex pattern
 - **Database Integration**: SQLite untuk data supplier dan logging
-- **Email Integration**: Support Outlook (COM) dan SMTP
+- **Email Integration**: Support Outlook (COM), SMTP, dan Thunderbird WebExtension
 - **Template Engine**: Jinja2 untuk email templates
 - **Modern UI**: PySide6 + PyQt-Fluent-Widgets
 
@@ -65,6 +65,53 @@ VALUES ('TT003', 'TT003', 'TOKO TOKO ABADI', 'Budi Santoso', '["budi@tokoabadi.c
 python src/main.py
 ```
 
+## Thunderbird WebExtension Integration
+
+Aplikasi ini mendukung integrasi dengan Thunderbird melalui WebExtension untuk pengiriman email yang lebih terintegrasi dengan Thunderbird's email management.
+
+### Fitur WebExtension
+
+- **Native Thunderbird Integration**: Menggunakan Thunderbird's Compose API
+- **Automatic Email History**: Email tersimpan otomatis di Thunderbird Sent folder
+- **Attachment Support**: Mendukung attachment file
+- **Real-time Communication**: WebSocket communication antara Python app dan Thunderbird
+
+### Instalasi WebExtension
+
+1. **Build Extension**:
+```bash
+python test_thunderbird_webextension.py
+```
+
+2. **Install ke Thunderbird**:
+   - Buka Thunderbird
+   - Go to **Tools > Add-ons**
+   - Click gear icon (⚙️) and select **"Install Add-on From File"**
+   - Pilih file `.xpi` yang dihasilkan
+   - Restart Thunderbird
+
+3. **Verifikasi Instalasi**:
+   - Check **Tools > Add-ons** untuk "Email Automation Thunderbird Extension"
+   - Pastikan extension enabled
+
+### Konfigurasi
+
+Pilih `thunderbird` sebagai email client di aplikasi:
+
+```ini
+email_client = thunderbird
+# WebExtension otomatis mendeteksi profile Thunderbird
+# Tidak perlu konfigurasi SMTP tambahan
+```
+
+### Troubleshooting WebExtension
+
+- **Extension tidak muncul**: Pastikan Thunderbird 78+ dan restart Thunderbird
+- **WebSocket connection failed**: Pastikan port 8765 tidak diblokir firewall
+- **Email tidak terkirim**: Periksa Browser Console di Thunderbird untuk error messages
+
+Untuk dokumentasi lengkap, lihat [THUNDERBIRD_WEBEXTENSION_README.md](THUNDERBIRD_WEBEXTENSION_README.md)
+
 ## Building Executable
 
 ### Using PyInstaller
@@ -116,6 +163,14 @@ smtp_port = 587
 smtp_username = your_email@gmail.com
 smtp_password = your_password
 smtp_use_tls = true
+```
+
+#### Thunderbird WebExtension
+```ini
+email_client = thunderbird
+# WebExtension automatically detects Thunderbird profile
+# No additional SMTP configuration needed
+# Requires Thunderbird WebExtension installation
 ```
 
 ### Template Variables
@@ -244,7 +299,7 @@ Referensi komponen penting di dalam kode:
 - Monitoring folder: [class FolderMonitor](src/core/folder_monitor.py:47), handler file [class FileHandler](src/core/folder_monitor.py:9)
 - Manajemen konfigurasi: [class ConfigManager](src/core/config_manager.py:6), ambil profile [def get_profile_config()](src/core/config_manager.py:69)
 - Engine template: [class EmailTemplateEngine](src/core/template_engine.py:7), proses variabel sederhana [def process_simple_variables()](src/core/template_engine.py:79), membuat template default [def create_default_templates()](src/core/template_engine.py:116)
-- Pengirim email: [class EmailSenderFactory](src/core/email_sender.py:148), Outlook [class OutlookSender](src/core/email_sender.py:21), SMTP/Thunderbird [class ThunderbirdSender](src/core/email_sender.py:73)
+- Pengirim email: [class EmailSenderFactory](src/core/email_sender.py:148), Outlook [class OutlookSender](src/core/email_sender.py:21), SMTP/Thunderbird [class ThunderbirdSender](src/core/email_sender.py:73), WebExtension [class ThunderbirdWebExtensionSender](src/core/thunderbird_extension_client.py:189)
 
 ## 1. Prasyarat Sistem
 
@@ -305,7 +360,7 @@ Antarmuka utama (lihat [class MainWindow](src/ui/main_window.py:106)) terdiri da
 - Monitor Folder: folder sumber yang dipantau
 - Sent Folder: folder tujuan perpindahan file setelah email terkirim
 - Key Pattern (Regex): pola untuk ekstraksi key dari nama file
-- Email Client: pilih `outlook`, `thunderbird`, atau `smtp`
+- Email Client: pilih `outlook`, `thunderbird`, atau `smtp` (untuk Thunderbird WebExtension, pilih `thunderbird`)
 - Constant Variables: default CC/BCC + 2 variabel custom
 
 2) Panel Tengah — Template & Preview
@@ -646,7 +701,7 @@ Output:
 - Export/Import profile: [def export_profile()](src/core/config_manager.py:200), [def import_profile()](src/core/config_manager.py:206)
 - Engine template: [def render_file_template()](src/core/template_engine.py:25), [def process_simple_variables()](src/core/template_engine.py:79)
 - Monitoring: [class FolderMonitor](src/core/folder_monitor.py:47), [def move_file_to_sent()](src/core/folder_monitor.py:134)
-- Pengirim email: [class EmailSenderFactory](src/core/email_sender.py:148), [class OutlookSender](src/core/email_sender.py:21), [class ThunderbirdSender](src/core/email_sender.py:73)
+- Pengirim email: [class EmailSenderFactory](src/core/email_sender.py:148), [class OutlookSender](src/core/email_sender.py:21), [class ThunderbirdSender](src/core/email_sender.py:73), [class ThunderbirdWebExtensionSender](src/core/thunderbird_extension_client.py:189)
 
 ## 17. Contoh Pola Regex (Key Pattern)
 

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 2,
+  "name": "Email Automation Thunderbird Extension",
+  "version": "1.0.0",
+  "description": "Integrates with Email Automation Desktop to send emails via Thunderbird compose API",
+  "applications": {
+    "gecko": {
+      "id": "email-automation@thunderbird",
+      "strict_min_version": "78.0"
+    }
+  },
+  "permissions": [
+    "compose",
+    "compose.send",
+    "compose.save",
+    "accountsRead",
+    "messagesRead",
+    "storage",
+    "activeTab"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "icons": {
+    "48": "icon.png",
+    "96": "icon@2x.png"
+  }
+}

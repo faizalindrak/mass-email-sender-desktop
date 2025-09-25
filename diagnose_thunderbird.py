@@ -1,164 +1,296 @@
 #!/usr/bin/env python3
 """
-Thunderbird Integration Diagnostic Script
-This script helps diagnose issues with Thunderbird email saving
+Thunderbird WebExtension Diagnostic Script
+Tests WebExtension installation, connection, and functionality
 """
 
 import os
 import sys
 import time
-import tempfile
-from typing import List
+import asyncio
+import logging
+from typing import Dict, Any
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-def diagnose_thunderbird():
-    """Diagnose Thunderbird integration issues"""
-    print("🔍 Thunderbird Integration Diagnostic")
+def setup_logging():
+    """Setup logging for diagnostic script"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('thunderbird_diagnostic.log')
+        ]
+    )
+    return logging.getLogger(__name__)
+
+def test_webextension_installation() -> Dict[str, Any]:
+    """Test WebExtension installation status"""
+    print("\n🔍 Testing WebExtension Installation")
     print("=" * 50)
 
     try:
-        from core.email_sender import ThunderbirdProfileManager
+        from src.utils.thunderbird_extension_manager import ThunderbirdExtensionManager
 
-        # Test 1: Profile Detection
-        print("\n1. Testing Thunderbird Profile Detection...")
-        profile_manager = ThunderbirdProfileManager()
-        print(f"   Profile path: {profile_manager.profile_path}")
+        manager = ThunderbirdExtensionManager()
+        extension_info = manager.get_extension_info()
 
-        if profile_manager.profile_path:
-            print("   ✅ Profile found")
-        else:
-            print("   ❌ No profile found")
-            return False
+        if extension_info:
+            print(f"✅ Extension info loaded: {extension_info.get('name')} v{extension_info.get('version')}")
 
-        # Test 2: Sent Folder Detection
-        print("\n2. Testing Sent Folder Detection...")
-        sent_folder = profile_manager.get_sent_folder_path()
-        print(f"   Sent folder: {sent_folder}")
+        # Test environment validation
+        validation = manager.validate_environment()
 
-        if sent_folder:
-            print("   ✅ Sent folder found")
+        results = {
+            'extension_info': extension_info,
+            'validation': validation,
+            'issues': []
+        }
 
-            # List existing files
-            try:
-                files = os.listdir(sent_folder)
-                eml_files = [f for f in files if f.endswith('.eml')]
-                print(f"   📁 Existing EML files: {len(eml_files)}")
-
-                for eml_file in eml_files[:5]:  # Show first 5
-                    file_path = os.path.join(sent_folder, eml_file)
-                    file_size = os.path.getsize(file_path)
-                    print(f"      - {eml_file} ({file_size} bytes)")
-            except Exception as e:
-                print(f"   ❌ Cannot list Sent folder: {e}")
-        else:
-            print("   ❌ Sent folder not found")
-            return False
-
-        # Test 3: EML File Creation
-        print("\n3. Testing EML File Creation...")
-        test_emails = ['test@example.com']
-        test_subject = 'Diagnostic Test Email'
-        test_body = '<p>This is a diagnostic test email to verify Thunderbird integration.</p>'
-
-        # Create test EML content
-        eml_content = profile_manager._create_eml_content(test_emails, test_subject, test_body)
-        print("   ✅ EML content created")
-
-        # Save test EML file
-        timestamp = int(time.time())
-        test_eml_path = os.path.join(sent_folder, f"diagnostic_{timestamp}.eml")
-
-        with open(test_eml_path, 'w', encoding='utf-8') as f:
-            f.write(eml_content)
-
-        if os.path.exists(test_eml_path):
-            file_size = os.path.getsize(test_eml_path)
-            print(f"   ✅ Test EML file created: {file_size} bytes")
-            print(f"   📄 File location: {test_eml_path}")
-
-            # Show EML content
-            print("   📋 EML Content Preview:")
-            lines = eml_content.split('\n')[:10]  # First 10 lines
-            for i, line in enumerate(lines, 1):
-                print(f"      {i:2d}: {line}")
-            if len(eml_content.split('\n')) > 10:
-                print(f"      ... ({len(eml_content.split('\n')) - 10} more lines)")
-        else:
-            print("   ❌ Failed to create test EML file")
-            return False
-
-        # Test 4: Thunderbird Process Check
-        print("\n4. Checking Thunderbird Process...")
-        try:
-            import psutil
-            thunderbird_processes = []
-
-            for proc in psutil.process_iter(['pid', 'name']):
-                if 'thunderbird' in proc.info['name'].lower():
-                    thunderbird_processes.append(proc.info)
-
-            if thunderbird_processes:
-                print(f"   ✅ Found {len(thunderbird_processes)} Thunderbird process(es):")
-                for proc in thunderbird_processes:
-                    print(f"      PID {proc['pid']}: {proc['name']}")
+        print("\n📋 Environment Validation Results:")
+        for key, value in validation.items():
+            if key == 'issues':
+                if value:
+                    print(f"⚠️  Issues found: {len(value)}")
+                    for issue in value:
+                        print(f"   - {issue}")
+                    results['issues'].extend(value)
+                else:
+                    print("✅ No validation issues")
             else:
-                print("   ⚠️  Thunderbird is not currently running")
-                print("   💡 Suggestion: Start Thunderbird to see new emails")
-        except ImportError:
-            print("   ⚠️  Cannot check processes (psutil not available)")
+                status = "✅" if value else "❌"
+                print(f"{status} {key}: {value}")
 
-        # Test 5: MSF File Check
-        print("\n5. Checking MSF Index Files...")
-        msf_file = sent_folder + ".msf"
-        if os.path.exists(msf_file):
-            msf_size = os.path.getsize(msf_file)
-            msf_mtime = os.path.getmtime(msf_file)
-            print(f"   ✅ MSF file exists: {msf_size} bytes, modified: {time.ctime(msf_mtime)}")
-
-            # Try to update MSF file timestamp
-            os.utime(msf_file, None)
-            print("   ✅ Updated MSF file timestamp")
+        # Test extension building
+        print("\n🔨 Testing Extension Building...")
+        xpi_path = manager.build_extension()
+        if xpi_path and os.path.exists(xpi_path):
+            file_size = os.path.getsize(xpi_path)
+            print(f"✅ Extension built successfully: {xpi_path}")
+            print(f"📦 Extension size: {file_size} bytes")
+            results['xpi_path'] = xpi_path
         else:
-            print("   ❌ MSF file not found")
-            print("   💡 Suggestion: Thunderbird may need to be started to create MSF files")
+            print("❌ Failed to build extension")
+            results['issues'].append("Extension build failed")
 
-        # Test 6: Permissions Check
-        print("\n6. Checking File Permissions...")
-        try:
-            # Test write permission
-            test_file = os.path.join(sent_folder, f"permission_test_{timestamp}.tmp")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.remove(test_file)
-            print("   ✅ Write permission OK")
-        except Exception as e:
-            print(f"   ❌ Write permission failed: {e}")
-            return False
+        # Test installation status
+        print("\n📦 Testing Installation Status...")
+        is_installed = manager.is_installed()
+        if is_installed:
+            print("✅ Extension is installed")
+            results['installed'] = True
+        else:
+            print("❌ Extension is not installed")
+            results['installed'] = False
+            results['issues'].append("Extension not installed")
 
-        print("\n" + "=" * 50)
-        print("🎉 Diagnostic completed successfully!")
-        print("\n📋 Summary:")
-        print(f"   Profile: {profile_manager.profile_path}")
-        print(f"   Sent Folder: {sent_folder}")
-        print(f"   Test EML: {test_eml_path}")
-        print(f"   Thunderbird Running: {'Yes' if thunderbird_processes else 'No'}")
-
-        print("\n🔧 Next Steps:")
-        print("   1. Open Thunderbird and check the Sent folder")
-        print("   2. Look for the diagnostic email with subject 'Diagnostic Test Email'")
-        print("   3. If you don't see it, try restarting Thunderbird")
-        print("   4. Check the logs for any error messages")
-
-        return True
+        return results
 
     except Exception as e:
-        print(f"❌ Diagnostic failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        print(f"❌ Installation test failed: {e}")
+        return {'error': str(e), 'issues': [str(e)]}
+
+def test_websocket_connection() -> Dict[str, Any]:
+    """Test WebSocket connection"""
+    print("\n🌐 Testing WebSocket Connection")
+    print("=" * 50)
+
+    try:
+        from src.core.thunderbird_extension_client import ThunderbirdExtensionClient
+
+        client = ThunderbirdExtensionClient()
+        results = {'client_created': True}
+
+        print("✅ WebExtension client created")
+
+        # Start WebSocket server
+        print("🚀 Starting WebSocket server...")
+        client.start_websocket_server()
+        print("✅ WebSocket server started on port 8765")
+        results['server_started'] = True
+
+        # Test connection
+        print("🔌 Testing connection...")
+        async def test_connection():
+            try:
+                connected = await client.connect()
+                return connected
+            except Exception as e:
+                print(f"❌ Connection failed: {str(e)}")
+                return False
+
+        connection_result = asyncio.run(test_connection())
+
+        if connection_result:
+            print("✅ WebSocket connection established")
+            results['connected'] = True
+
+            # Test availability check
+            print("🔍 Testing availability check...")
+            async def test_availability():
+                try:
+                    available = await client.check_availability()
+                    return available
+                except Exception as e:
+                    print(f"⚠️  Availability check failed: {str(e)}")
+                    return False
+
+            availability_result = asyncio.run(test_availability())
+
+            if availability_result:
+                print("✅ WebExtension is available")
+                results['available'] = True
+            else:
+                print("❌ WebExtension is not available")
+                results['available'] = False
+                results['issues'].append("WebExtension not available")
+
+            # Cleanup
+            async def cleanup():
+                await client.disconnect()
+
+            asyncio.run(cleanup())
+
+        else:
+            print("❌ WebSocket connection failed")
+            results['connected'] = False
+            results['issues'].append("WebSocket connection failed")
+
+        return results
+
+    except Exception as e:
+        print(f"❌ WebSocket test failed: {e}")
+        return {'error': str(e), 'issues': [str(e)]}
+
+def test_email_sender() -> Dict[str, Any]:
+    """Test email sender functionality"""
+    print("\n📧 Testing Email Sender")
+    print("=" * 50)
+
+    try:
+        from src.core.thunderbird_extension_client import ThunderbirdExtensionClient
+        from src.core.email_sender import ThunderbirdSender
+
+        # Create client and start server
+        client = ThunderbirdExtensionClient()
+        client.start_websocket_server()
+
+        # Create sender
+        sender = ThunderbirdSender(extension_client=client)
+        results = {'sender_created': True}
+
+        print("✅ ThunderbirdSender created")
+
+        # Test connection
+        print("🔌 Testing sender connection...")
+        connection_result = sender.test_connection()
+
+        if connection_result:
+            print("✅ Sender connection test passed")
+            results['connection_test'] = True
+        else:
+            print("❌ Sender connection test failed")
+            results['connection_test'] = False
+            results['issues'].append("Sender connection test failed")
+
+        # Test with mock email data
+        print("📝 Testing mock email send...")
+        async def test_mock_send():
+            try:
+                # This will fail in test environment but tests the code path
+                result = await sender.send_email(
+                    to_emails=['test@example.com'],
+                    subject='Test Email - Diagnostic',
+                    body='<p>This is a diagnostic test email</p>'
+                )
+
+                return result
+            except Exception as e:
+                print(f"⚠️  Mock send failed (expected): {str(e)}")
+                return False
+
+        mock_result = asyncio.run(test_mock_send())
+
+        if mock_result:
+            print("✅ Mock email send succeeded")
+            results['mock_send'] = True
+        else:
+            print("⚠️  Mock email send failed (expected in test environment)")
+            results['mock_send'] = False
+
+        return results
+
+    except Exception as e:
+        print(f"❌ Email sender test failed: {e}")
+        return {'error': str(e), 'issues': [str(e)]}
+
+def main():
+    """Run all diagnostic tests"""
+    print("🔧 Thunderbird WebExtension Diagnostic Tool")
+    print("=" * 60)
+
+    logger = setup_logging()
+    logger.info("Starting Thunderbird WebExtension diagnostic")
+
+    all_results = {}
+
+    # Test 1: Installation
+    install_results = test_webextension_installation()
+    all_results['installation'] = install_results
+
+    # Test 2: WebSocket Connection
+    websocket_results = test_websocket_connection()
+    all_results['websocket'] = websocket_results
+
+    # Test 3: Email Sender
+    sender_results = test_email_sender()
+    all_results['email_sender'] = sender_results
+
+    # Summary
+    print("\n" + "=" * 60)
+    print("📋 DIAGNOSTIC SUMMARY")
+    print("=" * 60)
+
+    total_issues = 0
+    for test_name, results in all_results.items():
+        issues = results.get('issues', [])
+        total_issues += len(issues)
+
+        print(f"\n{test_name.upper()} TEST:")
+        if issues:
+            print(f"⚠️  Issues found: {len(issues)}")
+            for issue in issues:
+                print(f"   - {issue}")
+        else:
+            print("✅ No issues found")
+
+    print(f"\n📊 OVERALL RESULTS: {total_issues} total issues found")
+
+    if total_issues == 0:
+        print("🎉 All tests passed! WebExtension integration should work.")
+        print("\nTo use the extension:")
+        print("1. Install the generated .xpi file to Thunderbird")
+        print("2. Restart Thunderbird")
+        print("3. Select 'thunderbird' as email client in the application")
+        print("4. Start monitoring to send emails via WebExtension")
+    else:
+        print("⚠️  Issues found. Please resolve them before using WebExtension integration.")
+        print("\nCommon solutions:")
+        print("1. Install the WebExtension to Thunderbird")
+        print("2. Restart Thunderbird to load the extension")
+        print("3. Check firewall settings for port 8765")
+        print("4. Ensure Thunderbird 78+ is installed")
+
+    # Show XPI file location if available
+    if install_results.get('xpi_path'):
+        print(f"\n📦 Extension file: {install_results['xpi_path']}")
+
+    logger.info(f"Diagnostic completed with {total_issues} issues")
+
+    return total_issues == 0
 
 if __name__ == "__main__":
-    success = diagnose_thunderbird()
+    success = main()
     sys.exit(0 if success else 1)

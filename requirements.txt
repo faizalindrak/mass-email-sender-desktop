@@ -24,3 +24,4 @@ pywin32-ctypes==0.2.3
 setuptools==80.9.0
 shiboken6==6.9.2
 watchdog==6.0.0
+websockets==13.1
