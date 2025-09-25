@@ -146,7 +146,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add icon path if you have one: 'assets/icon.ico'
+    icon='icon.ico',  # Application icon
     version=None,  # Version info file not needed for now
 )
 

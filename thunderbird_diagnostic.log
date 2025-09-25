@@ -1,0 +1,36 @@
+2025-09-26 00:47:21,528 - __main__ - INFO - Starting Thunderbird WebExtension diagnostic
+2025-09-26 00:47:21,696 - src.utils.thunderbird_extension_manager - ERROR - Failed to build extension: [Errno 22] Invalid argument: 'email_automation_thunderbird_extension-1.0.0.xpi'
+2025-09-26 00:47:21,707 - src.utils.thunderbird_extension_manager - ERROR - Failed to build extension: [Errno 22] Invalid argument: 'email_automation_thunderbird_extension-1.0.0.xpi'
+2025-09-26 00:47:21,799 - src.core.thunderbird_extension_client - INFO - WebSocket server started on localhost:8765
+2025-09-26 00:47:21,801 - src.core.thunderbird_extension_client - INFO - Attempting to connect to Thunderbird WebExtension at ws://localhost:8765
+2025-09-26 00:47:21,889 - websockets.server - INFO - server listening on 127.0.0.1:8765
+2025-09-26 00:47:21,889 - websockets.server - INFO - server listening on [::1]:8765
+2025-09-26 00:47:22,405 - websockets.server - INFO - connection open
+2025-09-26 00:47:22,405 - src.core.thunderbird_extension_client - INFO - Successfully connected to WebSocket at ws://localhost:8765
+2025-09-26 00:47:22,406 - src.core.thunderbird_extension_client - INFO - Connected to Thunderbird WebExtension at ws://localhost:8765
+2025-09-26 00:47:22,406 - src.core.thunderbird_extension_client - INFO - WebExtension connection established successfully
+2025-09-26 00:47:22,407 - src.core.thunderbird_extension_client - ERROR - Message handler error: cannot call recv while another coroutine is already waiting for the next message
+2025-09-26 00:47:27,422 - src.core.thunderbird_extension_client - ERROR - Websocket handler error: no close frame received or sent
+2025-09-26 00:47:27,423 - websockets.server - INFO - connection closed
+2025-09-26 00:47:27,426 - src.core.thunderbird_extension_client - ERROR - Not connected to WebExtension
+2025-09-26 00:47:27,520 - src.core.thunderbird_extension_client - INFO - WebSocket server started on localhost:8765
+2025-09-26 00:47:27,524 - src.core.thunderbird_extension_client - ERROR - Not connected to WebExtension
+2025-09-26 00:47:27,534 - __main__ - INFO - Diagnostic completed with 5 issues
+2025-09-26 00:48:48,321 - __main__ - INFO - Starting Thunderbird WebExtension diagnostic
+2025-09-26 00:48:48,474 - src.utils.thunderbird_extension_manager - INFO - Extension built successfully: email_automation_thunderbird_extension-1.0.0.xpi
+2025-09-26 00:48:48,492 - src.utils.thunderbird_extension_manager - INFO - Extension built successfully: email_automation_thunderbird_extension-1.0.0.xpi
+2025-09-26 00:48:48,559 - src.core.thunderbird_extension_client - INFO - WebSocket server started on localhost:8765
+2025-09-26 00:48:48,562 - src.core.thunderbird_extension_client - INFO - Attempting to connect to Thunderbird WebExtension at ws://localhost:8765
+2025-09-26 00:48:48,645 - websockets.server - INFO - server listening on [::1]:8765
+2025-09-26 00:48:48,645 - websockets.server - INFO - server listening on 127.0.0.1:8765
+2025-09-26 00:48:49,149 - src.core.thunderbird_extension_client - INFO - Successfully connected to WebSocket at ws://localhost:8765
+2025-09-26 00:48:49,149 - websockets.server - INFO - connection open
+2025-09-26 00:48:49,149 - src.core.thunderbird_extension_client - INFO - Connected to Thunderbird WebExtension at ws://localhost:8765
+2025-09-26 00:48:49,151 - src.core.thunderbird_extension_client - INFO - WebExtension connection established successfully
+2025-09-26 00:48:49,151 - src.core.thunderbird_extension_client - ERROR - Message handler error: cannot call recv while another coroutine is already waiting for the next message
+2025-09-26 00:48:54,155 - src.core.thunderbird_extension_client - ERROR - Websocket handler error: no close frame received or sent
+2025-09-26 00:48:54,156 - websockets.server - INFO - connection closed
+2025-09-26 00:48:54,171 - src.core.thunderbird_extension_client - ERROR - Not connected to WebExtension
+2025-09-26 00:48:54,235 - src.core.thunderbird_extension_client - INFO - WebSocket server started on localhost:8765
+2025-09-26 00:48:54,238 - src.core.thunderbird_extension_client - ERROR - Not connected to WebExtension
+2025-09-26 00:48:54,245 - __main__ - INFO - Diagnostic completed with 3 issues

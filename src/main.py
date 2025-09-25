@@ -28,6 +28,7 @@ try:
     from core.config_manager import ConfigManager
     from core.template_engine import EmailTemplateEngine
     from utils.logger import setup_logger
+    from utils.resources import get_resource_path
     print("Local modules imported successfully")
 except ImportError as e:
     print(f"Failed to import local modules: {e}")
@@ -46,6 +47,18 @@ def main():
         app.setApplicationName("Email Automation Desktop")
         app.setApplicationVersion("1.0.0")
         app.setOrganizationName("Email Automation")
+        
+        # Set application icon
+        try:
+            from PySide6.QtGui import QIcon
+            icon_path = get_resource_path('icon.ico')
+            if os.path.exists(icon_path):
+                app.setWindowIcon(QIcon(icon_path))
+                print(f"Application icon set: {icon_path}")
+            else:
+                print(f"Icon file not found: {icon_path}")
+        except Exception as e:
+            print(f"Failed to set application icon: {e}")
 
         # Enable high DPI scaling (remove deprecated warnings)
         # These are deprecated in newer Qt versions but still needed for older versions

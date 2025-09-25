@@ -1,17 +1,24 @@
 import sys
 import os
 import time
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                              QGridLayout, QSplitter, QTabWidget, QGroupBox,
-                              QLabel, QLineEdit, QPushButton, QComboBox, QTextEdit,
-                              QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
-                              QProgressBar, QStatusBar, QMenuBar, QToolBar, QFileDialog,
-                              QMessageBox, QCheckBox, QSpinBox)
-from PySide6.QtCore import Qt, QTimer, QThread, Signal  # Changed pyqtSignal to Signal
+import json
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
+                               QGridLayout, QSplitter, QTabWidget,
+                               QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
+                               QFileDialog, QMessageBox)
+from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QIcon, QFont
-from qfluentwidgets import (FluentIcon, setTheme, Theme, FluentWindow, NavigationAvatarWidget,
-                           qrouter, SubtitleLabel, setFont, BodyLabel, PushButton,
-                           PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox)
+
+from qfluentwidgets import (FluentIcon, setTheme, Theme, FluentWindow, NavigationItemPosition,
+                            qrouter, SubtitleLabel, setFont, BodyLabel, PushButton, TitleLabel,
+                            PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox,
+                            CardWidget, SimpleCardWidget, HeaderCardWidget, GroupHeaderCardWidget,
+                            SwitchButton, ToggleButton, Pivot, PivotItem, ScrollArea,
+                            InfoBar, InfoBarPosition, StrongBodyLabel, CaptionLabel,
+                            TableWidget, ListWidget, TreeWidget, ProgressBar,
+                            ToolTip, TeachingTip, TeachingTipTailPosition, PopupTeachingTip,
+                            FlyoutViewBase, Flyout, FlyoutAnimationType)
+from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QScrollArea, QWidget, QHBoxLayout
 
 from core.database_manager import DatabaseManager  # Changed relative import
 from core.config_manager import ConfigManager
@@ -19,6 +26,8 @@ from core.folder_monitor import FolderMonitor
 from core.email_sender import EmailSenderFactory
 from core.template_engine import EmailTemplateEngine
 from utils.logger import setup_logger
+from utils.resources import get_resource_path
+from ui.smtp_config_dialog import SMTPConfigDialog
 
 class EmailAutomationWorker(QThread):
     """Worker thread for email automation"""
@@ -103,6 +112,11 @@ class EmailAutomationWorker(QThread):
             self.logger.info(f"Merged BCC: {merged_bcc}")
 
             # Send email
+            self.logger.info(f"Attempting to send email with attachment: {file_path}")
+            self.logger.info(f"File exists: {os.path.exists(file_path)}")
+            self.logger.info(f"File is file: {os.path.isfile(file_path)}")
+            self.logger.info(f"File size: {os.path.getsize(file_path) if os.path.exists(file_path) else 'N/A'}")
+
             success = email_sender.send_email(
                 to_emails=supplier['emails'],
                 cc_emails=merged_cc,
@@ -129,9 +143,15 @@ class EmailAutomationWorker(QThread):
                 }
                 self.database_manager.log_email_sent(log_data)
 
-                # Move file to sent folder
+                # Move file to sent folder AFTER successful email sending
                 sent_folder = profile_config['sent_folder']
-                self.folder_monitor.move_file_to_sent(file_path, sent_folder)
+                moved_file_path = self.folder_monitor.move_file_to_sent(file_path, sent_folder)
+
+                # Log the file move operation
+                if moved_file_path:
+                    self.logger.info(f"File successfully moved to sent folder: {moved_file_path}")
+                else:
+                    self.logger.warning(f"Failed to move file to sent folder: {file_path}")
 
             self.file_processed.emit(file_path, key, success)
 
@@ -139,19 +159,113 @@ class EmailAutomationWorker(QThread):
             self.logger.error(f"Error processing file {file_path}: {str(e)}")
             self.error_occurred.emit(f"Error processing {os.path.basename(file_path)}: {str(e)}")
         finally:
-            # Ensure a 2-second delay between processing/sending files
+            # Ensure a 3-second delay between processing/sending files to allow file writes to complete
             try:
-                time.sleep(2)
+                time.sleep(3)
             except Exception:
                 pass
 
-class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
-    """Main application window"""
+class WrappingExtensionsWidget(QWidget):
+    """Custom widget for displaying file extensions in a wrapping layout"""
+
+    def __init__(self):
+        super().__init__()
+        self.checkboxes = {}  # Store extension -> checkbox mapping
+        self.init_ui()
+
+    def init_ui(self):
+        """Initialize the wrapping layout UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)  # Reduced spacing
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create scroll area for the extensions
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setMaximumHeight(120)  # Limit height
+
+        # Container widget for the grid layout
+        self.container = QWidget()
+        self.grid_layout = QGridLayout(self.container)
+        self.grid_layout.setSpacing(4)  # Reduced spacing
+        self.grid_layout.setContentsMargins(4, 4, 4, 4)  # Reduced margins
+
+        self.scroll_area.setWidget(self.container)
+        layout.addWidget(self.scroll_area)
+
+    def update_extensions(self, extensions, selected):
+        """Update the extensions with wrapping layout"""
+        # Clear existing checkboxes
+        self.clear_extensions()
+
+        # Create checkboxes for each extension
+        self.checkboxes = {}
+        row = 0
+        col = 0
+        max_cols = 6  # Maximum columns per row - increased for better horizontal layout
+
+        for ext in sorted(extensions):
+            checkbox = CheckBox(ext)
+            checkbox.setChecked(ext in selected)
+            self.checkboxes[ext] = checkbox
+
+            # Add to grid layout
+            self.grid_layout.addWidget(checkbox, row, col)
+
+            # Move to next column, wrap to next row if needed
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+
+        # Update container size
+        self.container.adjustSize()
+        self.scroll_area.updateGeometry()
+
+    def clear_extensions(self):
+        """Clear all extensions"""
+        # Remove all widgets from grid layout
+        for i in reversed(range(self.grid_layout.count())):
+            widget = self.grid_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        self.checkboxes.clear()
+
+    def get_selected_extensions(self):
+        """Get list of selected extensions"""
+        return [ext for ext, checkbox in self.checkboxes.items() if checkbox.isChecked()]
+
+    def select_all(self):
+        """Select all extensions"""
+        for checkbox in self.checkboxes.values():
+            checkbox.setChecked(True)
+
+    def clear_selection(self):
+        """Clear all selections"""
+        for checkbox in self.checkboxes.values():
+            checkbox.setChecked(False)
+
+class MainWindow(FluentWindow):
+    """Main application window with Fluent Design"""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Email Automation Desktop")
         self.resize(1200, 800)
+        
+        # Set window icon
+        try:
+            icon_path = get_resource_path('icon.ico')
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception as e:
+            print(f"Failed to set window icon: {e}")
+        
+        # Set fluent theme
+        setTheme(Theme.AUTO)
 
         # Initialize core components
         self.config_manager = ConfigManager()
@@ -162,314 +276,886 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         # Setup logger
         self.logger = setup_logger(__name__)
 
+        # Status
+        self.is_monitoring = False
+        self.files_processed_count = 0
+
         # Initialize UI
         self.init_ui()
         self.init_connections()
 
-        # Status
-        self.is_monitoring = False
-
     def init_ui(self):
-        """Initialize user interface"""
-        # Central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        # Main layout
-        main_layout = QHBoxLayout(central_widget)
-
-        # Create splitter
-        splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
-
-        # Left panel - Configuration
-        config_panel = self.create_config_panel()
-        splitter.addWidget(config_panel)
-
-        # Center panel - Template & Preview
-        template_panel = self.create_template_panel()
-        splitter.addWidget(template_panel)
-
-        # Right panel - Status & Logs
-        status_panel = self.create_status_panel()
-        splitter.addWidget(status_panel)
-
-        # Set splitter proportions
-        splitter.setSizes([300, 500, 400])
-
-        # Create status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
+        """Initialize user interface with Fluent Design"""
+        # Create navigation interfaces
+        self.config_interface = self.create_config_interface()
+        self.config_interface.setObjectName('ConfigInterface')
+        
+        self.template_interface = self.create_template_interface()
+        self.template_interface.setObjectName('TemplateInterface')
+        
+        self.status_interface = self.create_status_interface()
+        self.status_interface.setObjectName('StatusInterface')
+        
+        self.about_interface = self.create_about_interface()
+        self.about_interface.setObjectName('AboutInterface')
+        
+        # Add navigation items
+        self.addSubInterface(
+            self.config_interface,
+            FluentIcon.SETTING,
+            'Configuration',
+            NavigationItemPosition.TOP
+        )
+        
+        self.addSubInterface(
+            self.template_interface,
+            FluentIcon.EDIT,
+            'Templates',
+            NavigationItemPosition.TOP
+        )
+        
+        self.addSubInterface(
+            self.status_interface,
+            FluentIcon.INFO,
+            'Status & Logs',
+            NavigationItemPosition.TOP
+        )
+        
+        self.addSubInterface(
+            self.about_interface,
+            FluentIcon.HELP,
+            'About',
+            NavigationItemPosition.BOTTOM
+        )
 
         # Load current configuration
         self.load_current_config()
-
-    def create_config_panel(self):
-        """Create configuration panel"""
-        group = QGroupBox("Configuration")
-        layout = QVBoxLayout(group)
-
-        # Profile selection
-        profile_row = QHBoxLayout()
-        profile_row.addWidget(QLabel("Profile:"))
-        self.profile_combo = QComboBox()  # Changed from ComboBox to QComboBox
-        self.load_profile_btn = QPushButton("Load")
-        self.save_profile_btn = QPushButton("Save")
-        profile_row.addWidget(self.profile_combo)
-        profile_row.addWidget(self.load_profile_btn)
-        profile_row.addWidget(self.save_profile_btn)
-        layout.addLayout(profile_row)
-
-        # Database file
-        layout.addWidget(QLabel("Database File:"))
-        db_layout = QHBoxLayout()
-        self.database_path_edit = QLineEdit()
-        self.browse_database_btn = QPushButton("Browse")
-        db_layout.addWidget(self.database_path_edit)
-        db_layout.addWidget(self.browse_database_btn)
-        layout.addLayout(db_layout)
-
-        # Template folder
-        layout.addWidget(QLabel("Template Folder:"))
-        tpl_layout = QHBoxLayout()
-        self.template_dir_edit = QLineEdit()
-        self.browse_template_btn = QPushButton("Browse")
-        tpl_layout.addWidget(self.template_dir_edit)
-        tpl_layout.addWidget(self.browse_template_btn)
-        layout.addLayout(tpl_layout)
         
-        # Monitor folder
-        layout.addWidget(QLabel("Monitor Folder:"))
-        folder_layout = QHBoxLayout()
-        self.monitor_folder_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
-        self.browse_monitor_btn = QPushButton("Browse")  # Changed from PushButton to QPushButton
-        folder_layout.addWidget(self.monitor_folder_edit)
-        folder_layout.addWidget(self.browse_monitor_btn)
-        layout.addLayout(folder_layout)
+        # Show configuration interface by default
+        self.stackedWidget.setCurrentWidget(self.config_interface)
 
-        # Sent folder
-        layout.addWidget(QLabel("Sent Folder:"))
-        sent_layout = QHBoxLayout()
-        self.sent_folder_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
-        self.browse_sent_btn = QPushButton("Browse")  # Changed from PushButton to QPushButton
-        sent_layout.addWidget(self.sent_folder_edit)
-        sent_layout.addWidget(self.browse_sent_btn)
-        layout.addLayout(sent_layout)
+    def create_config_interface(self):
+        """Create configuration interface with Fluent Design"""
+        widget = ScrollArea()
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        widget.setWidgetResizable(True)
 
-        # Key pattern
-        layout.addWidget(QLabel("Key Pattern (Regex):"))
-        self.key_pattern_edit = QLineEdit()  # Changed from LineEdit to QLineEdit
-        layout.addWidget(self.key_pattern_edit)
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
 
-        # Email client
-        layout.addWidget(QLabel("Email Client:"))
-        self.email_client_combo = QComboBox()  # Changed from ComboBox to QComboBox
+        # Title
+        title_label = TitleLabel("Email Automation Configuration")
+        layout.addWidget(title_label)
+        layout.addSpacing(8)
+
+        # Profile Management Card
+        profile_card = GroupHeaderCardWidget("Profile Management")
+        profile_layout = QVBoxLayout()
+        profile_layout.setSpacing(8)
+        profile_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Profile selection row using grid layout
+        profile_grid = QGridLayout()
+        profile_grid.setSpacing(8)
+
+        profile_label = StrongBodyLabel("Current Profile:")
+        self.profile_combo = ComboBox()
+        self.profile_combo.setMinimumWidth(200)
+        self.load_profile_btn = PushButton(FluentIcon.FOLDER, "Load")
+        self.save_profile_btn = PrimaryPushButton(FluentIcon.SAVE, "Save")
+
+        profile_grid.addWidget(profile_label, 0, 0)
+        profile_grid.addWidget(self.profile_combo, 0, 1)
+        profile_grid.addWidget(self.load_profile_btn, 0, 2)
+        profile_grid.addWidget(self.save_profile_btn, 0, 3)
+        profile_grid.setColumnStretch(4, 1)
+
+        profile_layout.addLayout(profile_grid)
+        profile_card.viewLayout.addLayout(profile_layout)
+        layout.addWidget(profile_card)
+
+        # System Paths Card
+        paths_card = GroupHeaderCardWidget("System Paths")
+        paths_layout = QVBoxLayout()
+        paths_layout.setSpacing(8)
+        paths_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Database file row
+        db_grid = QGridLayout()
+        db_grid.setSpacing(8)
+        db_label = StrongBodyLabel("Database File:")
+        self.database_path_edit = LineEdit()
+        self.database_path_edit.setPlaceholderText("Select database file...")
+        self.database_path_edit.setMinimumWidth(300)
+        self.browse_database_btn = PushButton(FluentIcon.FOLDER, "Browse")
+        self.browse_database_btn.setFixedWidth(100)
+        db_grid.addWidget(db_label, 0, 0)
+        db_grid.addWidget(self.database_path_edit, 0, 1)
+        db_grid.addWidget(self.browse_database_btn, 0, 2)
+        db_grid.setColumnStretch(1, 1)
+        paths_layout.addLayout(db_grid)
+
+        # Template folder row
+        tpl_grid = QGridLayout()
+        tpl_grid.setSpacing(8)
+        tpl_label = StrongBodyLabel("Template Folder:")
+        self.template_dir_edit = LineEdit()
+        self.template_dir_edit.setPlaceholderText("Select template folder...")
+        self.template_dir_edit.setMinimumWidth(300)
+        self.browse_template_btn = PushButton(FluentIcon.FOLDER, "Browse")
+        self.browse_template_btn.setFixedWidth(100)
+        tpl_grid.addWidget(tpl_label, 0, 0)
+        tpl_grid.addWidget(self.template_dir_edit, 0, 1)
+        tpl_grid.addWidget(self.browse_template_btn, 0, 2)
+        tpl_grid.setColumnStretch(1, 1)
+        paths_layout.addLayout(tpl_grid)
+
+        paths_card.viewLayout.addLayout(paths_layout)
+        layout.addWidget(paths_card)
+
+        # Monitoring Settings Card
+        monitoring_card = GroupHeaderCardWidget("Monitoring Settings")
+        monitoring_layout = QVBoxLayout()
+        monitoring_layout.setSpacing(8)
+        monitoring_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Monitor folder row
+        monitor_grid = QGridLayout()
+        monitor_grid.setSpacing(8)
+        monitor_label = StrongBodyLabel("Monitor Folder:")
+        self.monitor_folder_edit = LineEdit()
+        self.monitor_folder_edit.setPlaceholderText("Select folder to monitor...")
+        self.monitor_folder_edit.setMinimumWidth(300)
+        self.browse_monitor_btn = PushButton(FluentIcon.FOLDER, "Browse")
+        self.browse_monitor_btn.setFixedWidth(100)
+        monitor_grid.addWidget(monitor_label, 0, 0)
+        monitor_grid.addWidget(self.monitor_folder_edit, 0, 1)
+        monitor_grid.addWidget(self.browse_monitor_btn, 0, 2)
+        monitor_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(monitor_grid)
+
+        # Sent folder row
+        sent_grid = QGridLayout()
+        sent_grid.setSpacing(8)
+        sent_label = StrongBodyLabel("Sent Folder:")
+        self.sent_folder_edit = LineEdit()
+        self.sent_folder_edit.setPlaceholderText("Select sent files folder...")
+        self.sent_folder_edit.setMinimumWidth(300)
+        self.browse_sent_btn = PushButton(FluentIcon.FOLDER, "Browse")
+        self.browse_sent_btn.setFixedWidth(100)
+        sent_grid.addWidget(sent_label, 0, 0)
+        sent_grid.addWidget(self.sent_folder_edit, 0, 1)
+        sent_grid.addWidget(self.browse_sent_btn, 0, 2)
+        sent_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(sent_grid)
+
+        # Key pattern row
+        pattern_grid = QGridLayout()
+        pattern_grid.setSpacing(8)
+        pattern_label = StrongBodyLabel("Key Pattern (Regex):")
+        self.key_pattern_edit = LineEdit()
+        self.key_pattern_edit.setPlaceholderText("Enter regex pattern to extract keys from filenames...")
+        self.key_pattern_edit.setMinimumWidth(300)
+        pattern_grid.addWidget(pattern_label, 0, 0)
+        pattern_grid.addWidget(self.key_pattern_edit, 0, 1)
+        pattern_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(pattern_grid)
+
+        # Email client row
+        client_grid = QGridLayout()
+        client_grid.setSpacing(8)
+        client_label = StrongBodyLabel("Email Client:")
+        self.email_client_combo = ComboBox()
         self.email_client_combo.addItems(["outlook", "thunderbird", "smtp"])
-        layout.addWidget(self.email_client_combo)
+        self.email_client_combo.setMinimumWidth(200)
+        self.smtp_config_btn = PushButton(FluentIcon.SETTING, "Set SMTP")
+        self.smtp_config_btn.setMinimumWidth(100)
+        self.smtp_config_btn.clicked.connect(self.open_smtp_config_dialog)
+        client_grid.addWidget(client_label, 0, 0)
+        client_grid.addWidget(self.email_client_combo, 0, 1)
+        client_grid.addWidget(self.smtp_config_btn, 0, 2)
+        client_grid.setColumnStretch(1, 1)
+        monitoring_layout.addLayout(client_grid)
 
-        # File Types to Monitor
-        layout.addWidget(QLabel("File Types to Monitor:"))
+        monitoring_card.viewLayout.addLayout(monitoring_layout)
+        layout.addWidget(monitoring_card)
+
+        # File Extensions Card
+        extensions_card = GroupHeaderCardWidget("File Types to Monitor")
+        extensions_layout = QVBoxLayout()
+        extensions_layout.setSpacing(8)
+        extensions_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Extension controls
         ext_controls_layout = QHBoxLayout()
-        self.scan_extensions_btn = QPushButton("Scan Extensions")
-        self.select_all_ext_btn = QPushButton("Select All")
-        self.clear_ext_btn = QPushButton("Clear")
+        ext_controls_layout.setSpacing(8)
+        self.scan_extensions_btn = PushButton(FluentIcon.SEARCH, "Scan Extensions")
+        self.select_all_ext_btn = PushButton(FluentIcon.CHECKBOX, "Select All")
+        self.clear_ext_btn = PushButton(FluentIcon.CANCEL, "Clear")
         ext_controls_layout.addWidget(self.scan_extensions_btn)
         ext_controls_layout.addWidget(self.select_all_ext_btn)
         ext_controls_layout.addWidget(self.clear_ext_btn)
         ext_controls_layout.addStretch()
-        layout.addLayout(ext_controls_layout)
+        extensions_layout.addLayout(ext_controls_layout)
 
-        self.extensions_list = QListWidget()
-        layout.addWidget(self.extensions_list)
-        
-        # Constant Variables Section
-        const_vars_group = QGroupBox("Constant Variables")
-        const_vars_layout = QVBoxLayout(const_vars_group)
+        self.extensions_widget = WrappingExtensionsWidget()
+        extensions_layout.addWidget(self.extensions_widget)
 
-        # Default CC emails
-        const_vars_layout.addWidget(QLabel("Default CC:"))
-        self.default_cc_edit = QLineEdit()
+        extensions_card.viewLayout.addLayout(extensions_layout)
+        layout.addWidget(extensions_card)
+
+        # Variables Card
+        variables_card = GroupHeaderCardWidget("Constant Variables")
+        variables_layout = QVBoxLayout()
+        variables_layout.setSpacing(8)
+        variables_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Default CC emails row
+        cc_grid = QGridLayout()
+        cc_grid.setSpacing(8)
+        cc_label = StrongBodyLabel("Default CC:")
+        self.default_cc_edit = LineEdit()
         self.default_cc_edit.setPlaceholderText("Default CC emails (semicolon separated)")
-        const_vars_layout.addWidget(self.default_cc_edit)
+        self.default_cc_edit.setMinimumWidth(300)
+        cc_grid.addWidget(cc_label, 0, 0)
+        cc_grid.addWidget(self.default_cc_edit, 0, 1)
+        cc_grid.setColumnStretch(1, 1)
+        variables_layout.addLayout(cc_grid)
 
-        # Default BCC emails
-        const_vars_layout.addWidget(QLabel("Default BCC:"))
-        self.default_bcc_edit = QLineEdit()
+        # Default BCC emails row
+        bcc_grid = QGridLayout()
+        bcc_grid.setSpacing(8)
+        bcc_label = StrongBodyLabel("Default BCC:")
+        self.default_bcc_edit = LineEdit()
         self.default_bcc_edit.setPlaceholderText("Default BCC emails (semicolon separated)")
-        const_vars_layout.addWidget(self.default_bcc_edit)
+        self.default_bcc_edit.setMinimumWidth(300)
+        bcc_grid.addWidget(bcc_label, 0, 0)
+        bcc_grid.addWidget(self.default_bcc_edit, 0, 1)
+        bcc_grid.setColumnStretch(1, 1)
+        variables_layout.addLayout(bcc_grid)
 
-        # Custom variable 1
-        const_vars_layout.addWidget(QLabel("Custom Variable 1:"))
-        custom1_layout = QHBoxLayout()
-        self.custom1_name_edit = QLineEdit()
+        # Custom variable 1 row
+        custom1_grid = QGridLayout()
+        custom1_grid.setSpacing(8)
+        custom1_label = StrongBodyLabel("Custom Variable 1:")
+        self.custom1_name_edit = LineEdit()
         self.custom1_name_edit.setPlaceholderText("Variable name")
-        self.custom1_value_edit = QLineEdit()
+        self.custom1_name_edit.setMinimumWidth(140)
+        self.custom1_value_edit = LineEdit()
         self.custom1_value_edit.setPlaceholderText("Variable value")
-        custom1_layout.addWidget(self.custom1_name_edit)
-        custom1_layout.addWidget(self.custom1_value_edit)
-        const_vars_layout.addLayout(custom1_layout)
+        self.custom1_value_edit.setMinimumWidth(140)
+        custom1_grid.addWidget(custom1_label, 0, 0)
+        custom1_grid.addWidget(self.custom1_name_edit, 0, 1)
+        custom1_grid.addWidget(self.custom1_value_edit, 0, 2)
+        custom1_grid.setColumnStretch(1, 1)
+        custom1_grid.setColumnStretch(2, 1)
+        variables_layout.addLayout(custom1_grid)
 
-        # Custom variable 2
-        const_vars_layout.addWidget(QLabel("Custom Variable 2:"))
-        custom2_layout = QHBoxLayout()
-        self.custom2_name_edit = QLineEdit()
+        # Custom variable 2 row
+        custom2_grid = QGridLayout()
+        custom2_grid.setSpacing(8)
+        custom2_label = StrongBodyLabel("Custom Variable 2:")
+        self.custom2_name_edit = LineEdit()
         self.custom2_name_edit.setPlaceholderText("Variable name")
-        self.custom2_value_edit = QLineEdit()
+        self.custom2_name_edit.setMinimumWidth(140)
+        self.custom2_value_edit = LineEdit()
         self.custom2_value_edit.setPlaceholderText("Variable value")
-        custom2_layout.addWidget(self.custom2_name_edit)
-        custom2_layout.addWidget(self.custom2_value_edit)
-        const_vars_layout.addLayout(custom2_layout)
+        self.custom2_value_edit.setMinimumWidth(140)
+        custom2_grid.addWidget(custom2_label, 0, 0)
+        custom2_grid.addWidget(self.custom2_name_edit, 0, 1)
+        custom2_grid.addWidget(self.custom2_value_edit, 0, 2)
+        custom2_grid.setColumnStretch(1, 1)
+        custom2_grid.setColumnStretch(2, 1)
+        variables_layout.addLayout(custom2_grid)
 
-        layout.addWidget(const_vars_group)
+        variables_card.viewLayout.addLayout(variables_layout)
+        layout.addWidget(variables_card)
 
-        # Control buttons - Single toggle button
-        button_layout = QVBoxLayout()
-        self.toggle_monitoring_btn = QPushButton("Start Monitoring")
-        self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; }")
-        button_layout.addWidget(self.toggle_monitoring_btn)
-        layout.addLayout(button_layout)
+        # Control Card
+        control_card = SimpleCardWidget()
+        control_layout = QVBoxLayout(control_card)
+        control_layout.setContentsMargins(16, 16, 16, 16)
 
-        layout.addStretch()
-        return group
+        self.toggle_monitoring_btn = PrimaryPushButton(FluentIcon.PLAY, "Start Monitoring")
+        self.toggle_monitoring_btn.setFixedHeight(40)
+        self.toggle_monitoring_btn.setMinimumWidth(160)
+        control_layout.addWidget(self.toggle_monitoring_btn)
 
-    def create_template_panel(self):
-        """Create template panel"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        layout.addWidget(control_card)
+        layout.addSpacing(12)
 
-        # Tab widget for email form and variables
-        tab_widget = QTabWidget()
-        layout.addWidget(tab_widget)
+        widget.setWidget(content_widget)
+        return widget
 
-        # Email form tab
-        email_form_widget = QWidget()
-        email_form_layout = QVBoxLayout(email_form_widget)
+    def create_template_interface(self):
+        """Create template interface with Fluent Design"""
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(20)
+        layout.setContentsMargins(32, 32, 32, 32)
+
+        # Title
+        title_label = TitleLabel("Email Templates & Composition")
+        layout.addWidget(title_label)
+        layout.addSpacing(8)
+
+        # Pivot for different sections
+        pivot = Pivot()
+        pivot.addItem(
+            routeKey='email_form',
+            text='Email Form',
+            onClick=lambda: self.stackedWidget_template.setCurrentIndex(0)
+        )
+        pivot.addItem(
+            routeKey='variables',
+            text='Variables',
+            onClick=lambda: self.stackedWidget_template.setCurrentIndex(1)
+        )
+        pivot.addItem(
+            routeKey='preview',
+            text='Preview',
+            onClick=lambda: self.stackedWidget_template.setCurrentIndex(2)
+        )
+        layout.addWidget(pivot)
+        layout.addSpacing(12)
+
+        # Create stacked widget for pivot content
+        from PySide6.QtWidgets import QStackedWidget
+        self.stackedWidget_template = QStackedWidget()
+        
+        # Email Form Content - wrapped in ScrollArea
+        email_form_scroll = ScrollArea()
+        email_form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        email_form_scroll.setWidgetResizable(True)
+        email_form_widget = self.create_email_form_content()
+        email_form_scroll.setWidget(email_form_widget)
+        self.stackedWidget_template.addWidget(email_form_scroll)
+        
+        # Variables Content - wrapped in ScrollArea
+        variables_scroll = ScrollArea()
+        variables_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        variables_scroll.setWidgetResizable(True)
+        variables_widget = self.create_variables_content()
+        variables_scroll.setWidget(variables_widget)
+        self.stackedWidget_template.addWidget(variables_scroll)
+        
+        # Preview Content - wrapped in ScrollArea
+        preview_scroll = ScrollArea()
+        preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        preview_scroll.setWidgetResizable(True)
+        preview_widget = self.create_preview_content()
+        preview_scroll.setWidget(preview_widget)
+        self.stackedWidget_template.addWidget(preview_scroll)
+        
+        layout.addWidget(self.stackedWidget_template, 1)  # Give it stretch factor
+
+        return content_widget
+
+    def create_email_form_content(self):
+        """Create email form content with fluent cards"""
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(20)
+        layout.setContentsMargins(0, 0, 0, 24)
+
+        # Recipients Card
+        recipients_card = GroupHeaderCardWidget("Email Recipients")
+        recipients_layout = QVBoxLayout()
+        recipients_layout.setSpacing(12)
+        recipients_layout.setContentsMargins(24, 24, 24, 24)
 
         # To field
-        email_form_layout.addWidget(QLabel("To:"))
-        self.to_emails_edit = QLineEdit()
+        to_row = QHBoxLayout()
+        to_row.addWidget(StrongBodyLabel("To:"))
+        to_row.addStretch()
+        recipients_layout.addLayout(to_row)
+        self.to_emails_edit = LineEdit()
         self.to_emails_edit.setPlaceholderText("Enter email addresses separated by semicolons")
-        email_form_layout.addWidget(self.to_emails_edit)
+        recipients_layout.addWidget(self.to_emails_edit)
+        
+        recipients_layout.addSpacing(8)
 
         # CC field
-        email_form_layout.addWidget(QLabel("CC:"))
-        self.cc_emails_edit = QLineEdit()
+        cc_row = QHBoxLayout()
+        cc_row.addWidget(StrongBodyLabel("CC:"))
+        cc_row.addStretch()
+        recipients_layout.addLayout(cc_row)
+        self.cc_emails_edit = LineEdit()
         self.cc_emails_edit.setPlaceholderText("Enter CC email addresses separated by semicolons")
-        email_form_layout.addWidget(self.cc_emails_edit)
+        recipients_layout.addWidget(self.cc_emails_edit)
+        
+        recipients_layout.addSpacing(8)
 
         # BCC field
-        email_form_layout.addWidget(QLabel("BCC:"))
-        self.bcc_emails_edit = QLineEdit()
+        bcc_row = QHBoxLayout()
+        bcc_row.addWidget(StrongBodyLabel("BCC:"))
+        bcc_row.addStretch()
+        recipients_layout.addLayout(bcc_row)
+        self.bcc_emails_edit = LineEdit()
         self.bcc_emails_edit.setPlaceholderText("Enter BCC email addresses separated by semicolons")
-        email_form_layout.addWidget(self.bcc_emails_edit)
+        recipients_layout.addWidget(self.bcc_emails_edit)
+
+        recipients_card.viewLayout.addLayout(recipients_layout)
+        layout.addWidget(recipients_card)
+
+        # Content Card
+        content_card = GroupHeaderCardWidget("Email Content")
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(24, 24, 24, 24)
 
         # Subject field
-        email_form_layout.addWidget(QLabel("Subject:"))
-        self.email_subject_edit = QLineEdit()
-        email_form_layout.addWidget(self.email_subject_edit)
+        subject_row = QHBoxLayout()
+        subject_row.addWidget(StrongBodyLabel("Subject:"))
+        subject_row.addStretch()
+        content_layout.addLayout(subject_row)
+        self.email_subject_edit = LineEdit()
+        self.email_subject_edit.setPlaceholderText("Enter email subject...")
+        content_layout.addWidget(self.email_subject_edit)
+        
+        content_layout.addSpacing(8)
 
-        # Body field with template selection
-        body_row = QHBoxLayout()
-        body_row.addWidget(QLabel("Template:"))
-        self.template_combo = QComboBox()
+        # Template selection
+        template_row = QHBoxLayout()
+        template_row.addWidget(StrongBodyLabel("Template:"))
+        template_row.addStretch()
+        content_layout.addLayout(template_row)
+        
+        template_input_row = QHBoxLayout()
+        template_input_row.setSpacing(12)
+        self.template_combo = ComboBox()
+        self.template_combo.setMinimumWidth(300)
         self.load_templates()
-        body_row.addWidget(self.template_combo)
-        email_form_layout.addLayout(body_row)
+        template_input_row.addWidget(self.template_combo)
+        template_input_row.addStretch()
+        content_layout.addLayout(template_input_row)
+        
+        content_layout.addSpacing(8)
 
-        email_form_layout.addWidget(QLabel("Body:"))
-        self.email_body_edit = QTextEdit()
-        email_form_layout.addWidget(self.email_body_edit)
+        # Body field
+        body_row = QHBoxLayout()
+        body_row.addWidget(StrongBodyLabel("Body:"))
+        body_row.addStretch()
+        content_layout.addLayout(body_row)
+        self.email_body_edit = TextEdit()
+        self.email_body_edit.setMinimumHeight(300)
+        content_layout.addWidget(self.email_body_edit)
 
-        # Template save and send buttons
-        send_button_layout = QHBoxLayout()
-        self.save_template_btn = QPushButton("Save Template File")
-        self.send_test_email_btn = QPushButton("Send Test Email")
-        send_button_layout.addWidget(self.save_template_btn)
-        send_button_layout.addWidget(self.send_test_email_btn)
-        send_button_layout.addStretch()
-        email_form_layout.addLayout(send_button_layout)
+        content_card.viewLayout.addLayout(content_layout)
+        layout.addWidget(content_card)
 
-        # Variables panel tab
-        variables_widget = QWidget()
-        variables_layout = QVBoxLayout(variables_widget)
+        # Actions Card
+        actions_card = SimpleCardWidget()
+        actions_layout = QHBoxLayout(actions_card)
+        actions_layout.setContentsMargins(24, 20, 24, 20)
+        actions_layout.setSpacing(12)
+        
+        self.save_template_btn = PushButton(FluentIcon.SAVE, "Save Template")
+        self.save_template_btn.setMinimumHeight(40)
+        self.save_template_btn.setMinimumWidth(140)
+        self.send_test_email_btn = PrimaryPushButton(FluentIcon.SEND, "Send Test Email")
+        self.send_test_email_btn.setMinimumHeight(40)
+        self.send_test_email_btn.setMinimumWidth(160)
+        actions_layout.addWidget(self.save_template_btn)
+        actions_layout.addWidget(self.send_test_email_btn)
+        actions_layout.addStretch()
 
-        # Available variables from database
-        variables_layout.addWidget(QLabel("Available Variables:"))
-        self.variables_list = QListWidget()
+        layout.addWidget(actions_card)
+
+        return content
+
+    def create_variables_content(self):
+        """Create variables content with fluent cards"""
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(20)
+        layout.setContentsMargins(0, 0, 0, 24)
+
+        # Available Variables Card
+        variables_card = GroupHeaderCardWidget("Available Variables")
+        variables_layout = QVBoxLayout()
+        variables_layout.setSpacing(16)
+        variables_layout.setContentsMargins(24, 24, 24, 24)
+
+        self.variables_list = ListWidget()
+        self.variables_list.setMinimumHeight(220)
         variables_layout.addWidget(self.variables_list)
 
         # Variable insertion buttons
         var_buttons_layout = QHBoxLayout()
-        self.insert_var_btn = QPushButton("Insert to Subject")
-        self.insert_var_body_btn = QPushButton("Insert to Body")
+        var_buttons_layout.setSpacing(12)
+        self.insert_var_btn = PushButton(FluentIcon.ADD, "Insert to Subject")
+        self.insert_var_btn.setMinimumHeight(40)
+        self.insert_var_btn.setMinimumWidth(140)
+        self.insert_var_body_btn = PushButton(FluentIcon.ADD, "Insert to Body")
+        self.insert_var_body_btn.setMinimumHeight(40)
+        self.insert_var_body_btn.setMinimumWidth(140)
         var_buttons_layout.addWidget(self.insert_var_btn)
         var_buttons_layout.addWidget(self.insert_var_body_btn)
+        var_buttons_layout.addStretch()
         variables_layout.addLayout(var_buttons_layout)
 
-        # Sample data section
-        variables_layout.addWidget(QLabel("Sample Data Preview:"))
-        self.sample_data_text = QTextEdit()
+        variables_card.viewLayout.addLayout(variables_layout)
+        layout.addWidget(variables_card)
+
+        # Sample Data Card
+        sample_card = GroupHeaderCardWidget("Sample Data Preview")
+        sample_layout = QVBoxLayout()
+        sample_layout.setSpacing(16)
+        sample_layout.setContentsMargins(24, 24, 24, 24)
+
+        self.sample_data_text = TextEdit()
         self.sample_data_text.setReadOnly(True)
-        self.sample_data_text.setMaximumHeight(150)
-        variables_layout.addWidget(self.sample_data_text)
-        # Load variables after sample_data_text is initialized to avoid attribute errors
+        self.sample_data_text.setMinimumHeight(200)
+        self.sample_data_text.setMaximumHeight(250)
+        sample_layout.addWidget(self.sample_data_text)
+        
+        # Load variables after sample_data_text is initialized
         self.load_available_variables()
 
-        # Preview tab
-        preview_widget = QWidget()
-        preview_layout = QVBoxLayout(preview_widget)
-        preview_layout.addWidget(QLabel("Email Preview:"))
-        self.preview_text = QTextEdit()
+        sample_card.viewLayout.addLayout(sample_layout)
+        layout.addWidget(sample_card)
+
+        return content
+
+    def create_preview_content(self):
+        """Create preview content with fluent cards"""
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(20)
+        layout.setContentsMargins(0, 0, 0, 24)
+
+        # Preview Card
+        preview_card = GroupHeaderCardWidget("Email Preview")
+        preview_layout = QVBoxLayout()
+        preview_layout.setSpacing(16)
+        preview_layout.setContentsMargins(24, 24, 24, 24)
+
+        # Preview button at top
+        button_row = QHBoxLayout()
+        self.preview_btn = PrimaryPushButton(FluentIcon.VIEW, "Generate Preview")
+        self.preview_btn.setMinimumHeight(40)
+        self.preview_btn.setMinimumWidth(180)
+        button_row.addWidget(self.preview_btn)
+        button_row.addStretch()
+        preview_layout.addLayout(button_row)
+        
+        preview_layout.addSpacing(8)
+
+        self.preview_text = TextEdit()
         self.preview_text.setReadOnly(True)
+        self.preview_text.setMinimumHeight(400)
         preview_layout.addWidget(self.preview_text)
-        self.preview_btn = QPushButton("Generate Preview")
-        preview_layout.addWidget(self.preview_btn)
 
-        tab_widget.addTab(email_form_widget, "Email Form")
-        tab_widget.addTab(variables_widget, "Variables")
-        tab_widget.addTab(preview_widget, "Preview")
+        preview_card.viewLayout.addLayout(preview_layout)
+        layout.addWidget(preview_card)
 
-        return widget
+        return content
 
-    def create_status_panel(self):
-        """Create status panel"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+    def create_status_interface(self):
+        """Create status interface with Fluent Design"""
+        widget = ScrollArea()
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        widget.setWidgetResizable(True)
+        
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(24)
+        layout.setContentsMargins(32, 32, 32, 32)
 
-        # Monitoring status
-        status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout(status_group)
+        # Title
+        title_label = TitleLabel("Status & Monitoring")
+        layout.addWidget(title_label)
+        layout.addSpacing(16)
 
-        self.status_label = QLabel("Monitoring: Stopped")
-        self.status_label.setStyleSheet("color: red; font-weight: bold;")
-        status_layout.addWidget(self.status_label)
+        # Status Card
+        status_card = GroupHeaderCardWidget("Monitoring Status")
+        status_layout = QVBoxLayout()
+        status_layout.setSpacing(16)
+        status_layout.setContentsMargins(20, 20, 20, 20)
 
-        self.files_processed_label = QLabel("Files Processed: 0")
-        status_layout.addWidget(self.files_processed_label)
+        # Status indicators in a grid
+        status_grid = QHBoxLayout()
+        status_grid.setSpacing(16)
+        
+        # Monitoring status indicator
+        monitoring_status_card = SimpleCardWidget()
+        monitoring_layout = QVBoxLayout(monitoring_status_card)
+        monitoring_layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.status_label = StrongBodyLabel("Monitoring: Stopped")
+        self.status_label.setStyleSheet("color: #d73527; font-weight: bold;")
+        monitoring_layout.addWidget(self.status_label)
+        
+        status_grid.addWidget(monitoring_status_card)
+        
+        # Files processed counter
+        files_counter_card = SimpleCardWidget()
+        files_layout = QVBoxLayout(files_counter_card)
+        files_layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.files_processed_label = StrongBodyLabel("Files Processed: 0")
+        files_layout.addWidget(self.files_processed_label)
+        
+        status_grid.addWidget(files_counter_card)
+        
+        status_layout.addLayout(status_grid)
+        status_card.viewLayout.addLayout(status_layout)
+        layout.addWidget(status_card)
 
-        layout.addWidget(status_group)
+        # Recent Files Card
+        recent_card = GroupHeaderCardWidget("Recent Files")
+        recent_layout = QVBoxLayout()
+        recent_layout.setSpacing(12)
+        recent_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Recent files
-        recent_group = QGroupBox("Recent Files")
-        recent_layout = QVBoxLayout(recent_group)
-
-        self.recent_files_list = QListWidget()
+        self.recent_files_list = ListWidget()
+        self.recent_files_list.setMinimumHeight(220)
         recent_layout.addWidget(self.recent_files_list)
 
-        layout.addWidget(recent_group)
+        recent_card.viewLayout.addLayout(recent_layout)
+        layout.addWidget(recent_card)
 
-        # Email logs
-        logs_group = QGroupBox("Email Logs")
-        logs_layout = QVBoxLayout(logs_group)
+        # Email Logs Card
+        logs_card = GroupHeaderCardWidget("Email Logs")
+        logs_layout = QVBoxLayout()
+        logs_layout.setSpacing(12)
+        logs_layout.setContentsMargins(20, 20, 20, 20)
 
-        self.logs_table = QTableWidget()
-        self.logs_table.setColumnCount(4)
-        self.logs_table.setHorizontalHeaderLabels(["Time", "File", "Supplier", "Status"])
+        self.logs_table = TableWidget()
+        self.logs_table.setColumnCount(7)
+        self.logs_table.setHorizontalHeaderLabels([
+            "Time", "File", "Supplier", "Subject", "Recipients", "Email Client", "Status"
+        ])
+
+        # Set column widths for better visibility
+        self.logs_table.setColumnWidth(0, 140)  # Time - wider for full timestamp
+        self.logs_table.setColumnWidth(1, 200)  # File - wider for full filename
+        self.logs_table.setColumnWidth(2, 120)  # Supplier - for supplier info
+        self.logs_table.setColumnWidth(3, 250)  # Subject - for email subject
+        self.logs_table.setColumnWidth(4, 200)  # Recipients - for email addresses
+        self.logs_table.setColumnWidth(5, 100)  # Email Client - for client type
+        self.logs_table.setColumnWidth(6, 80)   # Status - for status info
+
+        # Make columns resizable
+        header = self.logs_table.horizontalHeader()
+        header.setStretchLastSection(False)  # Don't stretch last column
+        header.setSectionResizeMode(0, header.ResizeMode.Fixed)      # Time
+        header.setSectionResizeMode(1, header.ResizeMode.Interactive) # File
+        header.setSectionResizeMode(2, header.ResizeMode.Interactive) # Supplier
+        header.setSectionResizeMode(3, header.ResizeMode.Interactive) # Subject
+        header.setSectionResizeMode(4, header.ResizeMode.Interactive) # Recipients
+        header.setSectionResizeMode(5, header.ResizeMode.Fixed)       # Email Client
+        header.setSectionResizeMode(6, header.ResizeMode.Fixed)       # Status
+
+        # Enable text wrapping for long content
+        self.logs_table.setWordWrap(True)
+        self.logs_table.setTextElideMode(Qt.TextElideMode.ElideNone)
+
+        # Set minimum height for better visibility
+        self.logs_table.setMinimumHeight(400)
+        self.logs_table.setMaximumHeight(600)
+
+        # Enable horizontal scrolling if needed
+        self.logs_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.logs_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # Enable sorting
+        self.logs_table.setSortingEnabled(True)
+        self.logs_table.sortByColumn(0, Qt.SortOrder.DescendingOrder)  # Sort by time descending
+
+        # Set selection behavior
+        self.logs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.logs_table.setAlternatingRowColors(True)
+
         logs_layout.addWidget(self.logs_table)
 
-        layout.addWidget(logs_group)
+        logs_card.viewLayout.addLayout(logs_layout)
+        layout.addWidget(logs_card)
 
+        layout.addSpacing(24)
+        widget.setWidget(content_widget)
+        return widget
+
+    def create_about_interface(self):
+        """Create about interface with usage guide and developer info"""
+        widget = ScrollArea()
+        widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        widget.setWidgetResizable(True)
+        
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(24)
+        layout.setContentsMargins(32, 32, 32, 32)
+
+        # Title
+        title_label = TitleLabel("About Email Automation Desktop")
+        layout.addWidget(title_label)
+        layout.addSpacing(16)
+
+        # Application Info Card
+        app_info_card = GroupHeaderCardWidget("Application Information")
+        app_info_layout = QVBoxLayout()
+        app_info_layout.setSpacing(12)
+        app_info_layout.setContentsMargins(20, 20, 20, 20)
+
+        app_info_text = BodyLabel(
+            "Email Automation Desktop v1.0.0\n"
+            "Automated email sending based on file monitoring\n"
+            "Built with PySide6 and PyQt-Fluent-Widgets"
+        )
+        app_info_layout.addWidget(app_info_text)
+
+        app_info_card.viewLayout.addLayout(app_info_layout)
+        layout.addWidget(app_info_card)
+
+        # Quick Usage Guide Card
+        usage_card = GroupHeaderCardWidget("Quick Usage Guide")
+        usage_layout = QVBoxLayout()
+        usage_layout.setSpacing(16)
+        usage_layout.setContentsMargins(20, 20, 20, 20)
+
+        usage_steps = [
+            "1. Configure Database & Templates",
+            "   • Set database file path (suppliers data)",
+            "   • Set template folder for email templates",
+            "",
+            "2. Setup Monitoring",
+            "   • Choose folder to monitor for new files",
+            "   • Set sent folder for processed files",
+            "   • Define key pattern (regex) to extract supplier codes",
+            "   • Select file extensions to monitor (.pdf, .xlsx, etc.)",
+            "",
+            "3. Configure Email Settings",
+            "   • Choose email client (Outlook/Thunderbird/SMTP)",
+            "   • Set default CC/BCC emails if needed",
+            "   • Add custom variables for templates",
+            "",
+            "4. Design Email Templates",
+            "   • Create email templates with variables",
+            "   • Use Variables tab to see available placeholders",
+            "   • Preview emails before sending",
+            "",
+            "5. Start Monitoring",
+            "   • Click 'Start Monitoring' button",
+            "   • Application will automatically process new files",
+            "   • Check Status & Logs for monitoring activity",
+            "",
+            "6. Monitor Results",
+            "   • View recent processed files",
+            "   • Check email logs for sent emails",
+            "   • Monitor processing status"
+        ]
+
+        usage_text = BodyLabel('\n'.join(usage_steps))
+        usage_text.setWordWrap(True)
+        usage_layout.addWidget(usage_text)
+
+        usage_card.viewLayout.addLayout(usage_layout)
+        layout.addWidget(usage_card)
+
+        # Variable Examples Card
+        variables_card = GroupHeaderCardWidget("Template Variables Examples")
+        variables_layout = QVBoxLayout()
+        variables_layout.setSpacing(12)
+        variables_layout.setContentsMargins(20, 20, 20, 20)
+
+        variables_examples = [
+            "System Variables:",
+            "• [filename] - Full filename with extension",
+            "• [filename_without_ext] - Filename without extension",
+            "• [filepath] - Complete file path",
+            "• [date] - Current date",
+            "• [time] - Current time",
+            "",
+            "Supplier Variables (from database):",
+            "• [supplier_code] - Supplier identification code",
+            "• [supplier_name] - Company/supplier name",
+            "• [contact_name] - Contact person name",
+            "• [emails] - Primary email addresses",
+            "",
+            "Example Usage in Templates:",
+            'Subject: "Invoice [filename_without_ext] for [supplier_name]"',
+            'Body: "Dear [contact_name], please find attached [filename]..."'
+        ]
+
+        variables_text = BodyLabel('\n'.join(variables_examples))
+        variables_text.setWordWrap(True)
+        variables_layout.addWidget(variables_text)
+
+        variables_card.viewLayout.addLayout(variables_layout)
+        layout.addWidget(variables_card)
+
+        # Troubleshooting Card
+        troubleshooting_card = GroupHeaderCardWidget("Troubleshooting Tips")
+        troubleshooting_layout = QVBoxLayout()
+        troubleshooting_layout.setSpacing(12)
+        troubleshooting_layout.setContentsMargins(20, 20, 20, 20)
+
+        troubleshooting_tips = [
+            "Common Issues & Solutions:",
+            "",
+            "• Files not being processed:",
+            "  - Check monitor folder path exists",
+            "  - Verify key pattern regex is correct",
+            "  - Ensure file extensions are selected",
+            "  - Check supplier exists in database for extracted key",
+            "",
+            "• Emails not sending:",
+            "  - Verify email client is configured properly",
+            "  - Check internet connection",
+            "  - Ensure Outlook is running (for Outlook client)",
+            "  - Verify SMTP settings (for Thunderbird/SMTP)",
+            "",
+            "• Template variables not working:",
+            "  - Use correct variable syntax: [variable_name]",
+            "  - Check Variables tab for available options",
+            "  - Ensure supplier data exists in database",
+            "",
+            "• Performance issues:",
+            "  - Limit file extensions to necessary types only",
+            "  - Keep monitoring folder organized",
+            "  - Regular database maintenance"
+        ]
+
+        troubleshooting_text = BodyLabel('\n'.join(troubleshooting_tips))
+        troubleshooting_text.setWordWrap(True)
+        troubleshooting_layout.addWidget(troubleshooting_text)
+
+        troubleshooting_card.viewLayout.addLayout(troubleshooting_layout)
+        layout.addWidget(troubleshooting_card)
+
+        # Developer Credit Card
+        credit_card = SimpleCardWidget()
+        credit_layout = QVBoxLayout(credit_card)
+        credit_layout.setContentsMargins(24, 20, 24, 20)
+        credit_layout.setSpacing(8)
+
+        # Center the developer info
+        credit_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        developed_label = StrongBodyLabel("Developed by")
+        developed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_layout.addWidget(developed_label)
+        
+        developer_label = TitleLabel("Faizal Kusmawan")
+        developer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        developer_label.setStyleSheet("color: #0078d4; font-weight: bold;")
+        credit_layout.addWidget(developer_label)
+        
+        # Add some spacing
+        credit_layout.addSpacing(8)
+        
+        version_label = CaptionLabel("Email Automation Desktop v1.0.0")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_layout.addWidget(version_label)
+
+        layout.addWidget(credit_card)
+        layout.addSpacing(24)
+
+        widget.setWidget(content_widget)
         return widget
 
     def init_connections(self):
@@ -492,10 +1178,13 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         self.scan_extensions_btn.clicked.connect(self.scan_monitor_folder_extensions)
         self.select_all_ext_btn.clicked.connect(self.select_all_extensions)
         self.clear_ext_btn.clicked.connect(self.clear_extensions_selection)
-        
+
         # Profile combo
         self.profile_combo.currentTextChanged.connect(self.load_profile_config)
-        
+
+        # Email client combo
+        self.email_client_combo.currentTextChanged.connect(self.on_email_client_changed)
+
         # Worker signals
         self.worker.file_processed.connect(self.on_file_processed)
         self.worker.error_occurred.connect(self.on_error_occurred)
@@ -505,13 +1194,16 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         # Load profiles
         profiles = self.config_manager.get_available_profiles()
         self.profile_combo.clear()
+        self.profile_names = []  # Store profile names separately
+        
         for profile in profiles:
-            self.profile_combo.addItem(profile['display_name'], profile['name'])
+            self.profile_combo.addItem(profile['display_name'])
+            self.profile_names.append(profile['name'])
 
         # Set current profile
         current_profile = self.config_manager.get_current_profile()
-        for i in range(self.profile_combo.count()):
-            if self.profile_combo.itemData(i) == current_profile:
+        for i, profile_name in enumerate(self.profile_names):
+            if profile_name == current_profile:
                 self.profile_combo.setCurrentIndex(i)
                 break
 
@@ -519,9 +1211,11 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
 
     def load_profile_config(self):
         """Load configuration for selected profile"""
-        profile_name = self.profile_combo.currentData()
-        if not profile_name:
+        current_index = self.profile_combo.currentIndex()
+        if current_index < 0 or current_index >= len(self.profile_names):
             return
+        
+        profile_name = self.profile_names[current_index]
 
         try:
             config = self.config_manager.get_profile_config(profile_name)
@@ -539,9 +1233,11 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
 
             # Set email client
             client = config.get('email_client', 'outlook')
-            index = self.email_client_combo.findText(client)
-            if index >= 0:
-                self.email_client_combo.setCurrentIndex(index)
+            # For fluent ComboBox, we need to find the text manually
+            for i in range(self.email_client_combo.count()):
+                if self.email_client_combo.itemText(i) == client:
+                    self.email_client_combo.setCurrentIndex(i)
+                    break
 
             # Populate file extensions from monitoring folder and preselect from config
             try:
@@ -556,6 +1252,9 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             self.custom1_value_edit.setText(config.get('custom1_value', ''))
             self.custom2_name_edit.setText(config.get('custom2_name', ''))
             self.custom2_value_edit.setText(config.get('custom2_value', ''))
+
+            # Update SMTP button visibility based on email client
+            self.on_email_client_changed()
 
             # Load email form fields
             email_form = config.get('email_form', {})
@@ -572,10 +1271,15 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             if selected_template:
                 # Ensure templates are loaded into combo
                 self.load_templates()
-                idx = self.template_combo.findText(selected_template)
-                if idx >= 0:
-                    self.template_combo.setCurrentIndex(idx)
-                else:
+                # Search for template manually in fluent ComboBox
+                template_found = False
+                for i in range(self.template_combo.count()):
+                    if self.template_combo.itemText(i) == selected_template:
+                        self.template_combo.setCurrentIndex(i)
+                        template_found = True
+                        break
+                
+                if not template_found:
                     # Add missing template name if not present
                     self.template_combo.addItem(selected_template)
                     self.template_combo.setCurrentIndex(self.template_combo.count() - 1)
@@ -661,40 +1365,29 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
     def update_extensions_list(self, extensions, selected):
         """Update the extensions list with checkable items and preselected values"""
         try:
-            self.extensions_list.clear()
-            for ext in extensions:
-                item = QListWidgetItem(ext)
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(Qt.Checked if ext in selected else Qt.Unchecked)
-                self.extensions_list.addItem(item)
+            self.extensions_widget.update_extensions(extensions, selected)
         except Exception as e:
             self.logger.error(f"Failed to update extensions list: {str(e)}")
 
     def get_selected_extensions(self):
-        """Get currently selected extensions from the list"""
-        selected = []
+        """Get currently selected extensions from the widget"""
         try:
-            for i in range(self.extensions_list.count()):
-                item = self.extensions_list.item(i)
-                if item.checkState() == Qt.Checked:
-                    selected.append(item.text())
+            return self.extensions_widget.get_selected_extensions()
         except Exception as e:
             self.logger.error(f"Failed to read selected extensions: {str(e)}")
-        return selected
+            return []
 
     def select_all_extensions(self):
-        """Select all extensions in the list"""
+        """Select all extensions in the widget"""
         try:
-            for i in range(self.extensions_list.count()):
-                self.extensions_list.item(i).setCheckState(Qt.Checked)
+            self.extensions_widget.select_all()
         except Exception as e:
             self.logger.error(f"Failed to select all extensions: {str(e)}")
 
     def clear_extensions_selection(self):
-        """Clear all selections in the extensions list"""
+        """Clear all selections in the extensions widget"""
         try:
-            for i in range(self.extensions_list.count()):
-                self.extensions_list.item(i).setCheckState(Qt.Unchecked)
+            self.extensions_widget.clear_selection()
         except Exception as e:
             self.logger.error(f"Failed to clear extensions selection: {str(e)}")
 
@@ -716,7 +1409,15 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 self.refresh_logs_table()
                 # Persist database path into global JSON config
                 self.config_manager.set_database_path(file_path)
-                self.status_bar.showMessage(f"Database set to: {file_path}", 3000)
+                InfoBar.success(
+                    title="Database Updated",
+                    content=f"Database set to: {file_path}",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
 
@@ -735,7 +1436,15 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 # Reload templates and content
                 self.load_templates()
                 self.load_selected_template()
-                self.status_bar.showMessage(f"Template folder set to: {folder}", 3000)
+                InfoBar.success(
+                    title="Template Updated",
+                    content=f"Template folder set to: {folder}",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to set template folder: {str(e)}")
 
@@ -754,7 +1463,15 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             content = self.email_body_edit.toPlainText()
             with open(template_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            self.status_bar.showMessage(f"Template saved: {template_path}", 3000)
+            InfoBar.success(
+                title="Template Saved",
+                content=f"Template saved: {template_path}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
             QMessageBox.information(self, "Success", f"Template file updated:\n{template_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save template: {str(e)}")
@@ -789,9 +1506,9 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             if success:
                 self.is_monitoring = True
                 self.toggle_monitoring_btn.setText("Stop Monitoring")
-                self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #d73527; color: white; font-weight: bold; }")
+                self.toggle_monitoring_btn.setIcon(FluentIcon.PAUSE)
                 self.status_label.setText("Monitoring: Active")
-                self.status_label.setStyleSheet("color: green; font-weight: bold;")
+                self.status_label.setStyleSheet("color: #107c10; font-weight: bold;")
 
                 # Process existing files in the folder on start so not only new files are sent
                 try:
@@ -801,10 +1518,26 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                         key_pattern=profile_config['key_pattern'],
                         file_extensions=profile_config.get('file_extensions', [])
                     )
-                    self.status_bar.showMessage(f"Monitoring folder: {monitor_folder} | Existing files processed: {len(processed_existing)}")
+                    InfoBar.success(
+                        title="Monitoring Started",
+                        content=f"Monitoring folder: {monitor_folder} | Existing files processed: {len(processed_existing)}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
                 except Exception as pe:
                     # Even if processing existing files fails, keep monitoring running
-                    self.status_bar.showMessage(f"Monitoring folder: {monitor_folder} | Failed to process existing files: {str(pe)}")
+                    InfoBar.warning(
+                        title="Monitoring Started",
+                        content=f"Monitoring folder: {monitor_folder} | Failed to process existing files: {str(pe)}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=5000,
+                        parent=self
+                    )
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to start monitoring: {str(e)}")
@@ -815,10 +1548,18 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             self.worker.folder_monitor.stop_monitoring()
             self.is_monitoring = False
             self.toggle_monitoring_btn.setText("Start Monitoring")
-            self.toggle_monitoring_btn.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; }")
+            self.toggle_monitoring_btn.setIcon(FluentIcon.PLAY)
             self.status_label.setText("Monitoring: Stopped")
-            self.status_label.setStyleSheet("color: red; font-weight: bold;")
-            self.status_bar.showMessage("Monitoring stopped")
+            self.status_label.setStyleSheet("color: #d73527; font-weight: bold;")
+            InfoBar.success(
+                title="Monitoring Stopped",
+                content="Monitoring stopped",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to stop monitoring: {str(e)}")
@@ -826,11 +1567,13 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
     def save_current_config(self):
         """Save current configuration"""
         try:
-            profile_name = self.profile_combo.currentData()
-            if not profile_name:
+            current_index = self.profile_combo.currentIndex()
+            if current_index < 0 or current_index >= len(self.profile_names):
                 return
 
-            # Get existing profile to preserve values not present in UI (e.g., file_extensions, subject_template)
+            profile_name = self.profile_names[current_index]
+
+            # Get existing profile to preserve values not present in UI (e.g., file_extensions, subject_template, SMTP settings)
             existing = {}
             try:
                 existing = self.config_manager.get_profile_config(profile_name)
@@ -862,10 +1605,10 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 # Templates
                 'subject_template': existing.get('subject_template', '[filename_without_ext]'),
                 'body_template': selected_template,
-                
+
                 # File extensions selected from UI (fallback to existing if none selected)
                 'file_extensions': (self.get_selected_extensions() or existing.get('file_extensions', [])),
-                
+
                 # Constant variables
                 'default_cc': self.default_cc_edit.text(),
                 'default_bcc': self.default_bcc_edit.text(),
@@ -878,9 +1621,10 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 'email_form': email_form
             }
 
-            # Preserve 'name' if exists
-            if 'name' in existing:
-                config_data['name'] = existing['name']
+            # Preserve existing values that are not set by UI (SMTP settings, name, etc.)
+            for key, value in existing.items():
+                if key not in config_data:
+                    config_data[key] = value
 
             # Persist global database path and current profile
             db_path_text = self.database_path_edit.text().strip()
@@ -891,7 +1635,7 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
             if tpl_dir_text:
                 self.config_manager.set_template_dir(tpl_dir_text)
             self.config_manager.set_current_profile(profile_name)
-            
+
             self.config_manager.save_profile_config(profile_name, config_data)
 
         except Exception as e:
@@ -921,20 +1665,156 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
 
     def on_error_occurred(self, error_message: str):
         """Handle error signal"""
-        self.status_bar.showMessage(f"Error: {error_message}", 5000)
+        InfoBar.error(
+            title="Processing Error",
+            content=f"Error: {error_message}",
+            orient=Qt.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            duration=5000,
+            parent=self
+        )
         QMessageBox.warning(self, "Processing Error", error_message)
 
     def refresh_logs_table(self):
-        """Refresh email logs table"""
+        """Refresh email logs table with enhanced visibility"""
         try:
-            logs = self.database_manager.get_email_logs(limit=50)
+            logs = self.database_manager.get_email_logs(limit=100)
             self.logs_table.setRowCount(len(logs))
 
             for row, log in enumerate(logs):
-                self.logs_table.setItem(row, 0, QTableWidgetItem(log.get('sent_at', '')))
-                self.logs_table.setItem(row, 1, QTableWidgetItem(log.get('filename', '')))
-                self.logs_table.setItem(row, 2, QTableWidgetItem(log.get('supplier_key', '')))
-                self.logs_table.setItem(row, 3, QTableWidgetItem(log.get('status', '')))
+                # Time column - format timestamp for better readability
+                sent_at = log.get('sent_at', '')
+                if sent_at:
+                    # Try to format the timestamp if it's in ISO format
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
+                        formatted_time = dt.strftime('%Y-%m-%d\n%H:%M:%S')
+                    except:
+                        formatted_time = sent_at
+                else:
+                    formatted_time = ''
+                self.logs_table.setItem(row, 0, QTableWidgetItem(formatted_time))
+
+                # File column - show full filename
+                filename = log.get('filename', '')
+                # Show full filename, add tooltip with full path if available
+                file_path = log.get('file_path', '')
+                filename_item = QTableWidgetItem(filename)
+                if file_path and file_path != filename:
+                    filename_item.setToolTip(f"Full path: {file_path}")
+                self.logs_table.setItem(row, 1, filename_item)
+
+                # Supplier column - show both key and name
+                supplier_key = log.get('supplier_key', '')
+                supplier_info = supplier_key
+
+                # Try to get supplier name from database
+                try:
+                    supplier = self.database_manager.get_supplier_by_key(supplier_key)
+                    if supplier:
+                        supplier_name = supplier.get('supplier_name', '')
+                        if supplier_name and supplier_name != supplier_key:
+                            supplier_info = f"{supplier_key}\n{supplier_name}"
+                except:
+                    pass  # Keep original supplier_key if lookup fails
+
+                supplier_item = QTableWidgetItem(supplier_info)
+                # Add tooltip with additional supplier information
+                try:
+                    supplier = self.database_manager.get_supplier_by_key(supplier_key)
+                    if supplier:
+                        contact_name = supplier.get('contact_name', '')
+                        emails = supplier.get('emails', [])
+                        cc_emails = supplier.get('cc_emails', [])
+                        bcc_emails = supplier.get('bcc_emails', [])
+
+                        tooltip_parts = []
+                        if contact_name:
+                            tooltip_parts.append(f"Contact: {contact_name}")
+                        if emails:
+                            tooltip_parts.append(f"Emails: {', '.join(emails)}")
+                        if cc_emails:
+                            tooltip_parts.append(f"CC: {', '.join(cc_emails)}")
+                        if bcc_emails:
+                            tooltip_parts.append(f"BCC: {', '.join(bcc_emails)}")
+
+                        if tooltip_parts:
+                            supplier_item.setToolTip('\n'.join(tooltip_parts))
+                except:
+                    pass  # Keep simple tooltip if lookup fails
+
+                self.logs_table.setItem(row, 2, supplier_item)
+
+                # Subject column - show email subject
+                subject = log.get('subject', '')
+                # Truncate very long subjects for display
+                display_subject = subject
+                if len(subject) > 60:
+                    display_subject = subject[:57] + "..."
+
+                subject_item = QTableWidgetItem(display_subject)
+                # Add full subject as tooltip if truncated
+                if len(subject) > 60:
+                    subject_item.setToolTip(subject)
+                self.logs_table.setItem(row, 3, subject_item)
+
+                # Recipients column - show recipient emails
+                recipient_emails = log.get('recipient_emails', '[]')
+                try:
+                    # Handle empty, null, or invalid JSON data
+                    if not recipient_emails or recipient_emails == '[]' or recipient_emails == '':
+                        emails = []
+                    else:
+                        emails = json.loads(recipient_emails)
+
+                    if emails and isinstance(emails, list):
+                        recipients_text = '\n'.join(emails[:3])  # Show first 3 emails
+                        if len(emails) > 3:
+                            recipients_text += f"\n... (+{len(emails) - 3} more)"
+
+                        # Add full list as tooltip
+                        full_recipients = '\n'.join(emails)
+                        recipients_item = QTableWidgetItem(recipients_text)
+                        recipients_item.setToolTip(f"All recipients:\n{full_recipients}")
+                    else:
+                        recipients_text = 'No recipients'
+                        recipients_item = QTableWidgetItem(recipients_text)
+                except (json.JSONDecodeError, TypeError) as e:
+                    # Handle malformed JSON or other parsing errors
+                    if recipient_emails and recipient_emails != '[]':
+                        # Try to extract emails from malformed JSON or show raw data
+                        recipients_text = str(recipient_emails)[:50] + "..." if len(str(recipient_emails)) > 50 else str(recipient_emails)
+                        recipients_item = QTableWidgetItem(recipients_text)
+                        recipients_item.setToolTip(f"Raw data: {recipient_emails}")
+                    else:
+                        recipients_text = 'No recipients'
+                        recipients_item = QTableWidgetItem(recipients_text)
+
+                self.logs_table.setItem(row, 4, recipients_item)
+
+                # Email Client column
+                email_client = log.get('email_client', '')
+                client_item = QTableWidgetItem(email_client)
+                self.logs_table.setItem(row, 5, client_item)
+
+                # Status column - enhanced status display
+                status = log.get('status', 'sent')
+                status_item = QTableWidgetItem(status.upper())
+
+                # Color code status
+                if status.lower() == 'sent':
+                    status_item.setBackground(Qt.GlobalColor.green)
+                    status_item.setForeground(Qt.GlobalColor.white)
+                elif status.lower() == 'failed':
+                    status_item.setBackground(Qt.GlobalColor.red)
+                    status_item.setForeground(Qt.GlobalColor.white)
+                elif status.lower() == 'pending':
+                    status_item.setBackground(Qt.GlobalColor.yellow)
+                    status_item.setForeground(Qt.GlobalColor.black)
+
+                self.logs_table.setItem(row, 6, status_item)
 
         except Exception as e:
             self.logger.error(f"Failed to refresh logs table: {str(e)}")
@@ -957,8 +1837,8 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
                 self.load_current_config()
 
                 # Set to newly imported profile
-                for i in range(self.profile_combo.count()):
-                    if self.profile_combo.itemData(i) == profile_name:
+                for i, stored_profile_name in enumerate(self.profile_names):
+                    if stored_profile_name == profile_name:
                         self.profile_combo.setCurrentIndex(i)
                         break
 
@@ -969,10 +1849,12 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
 
     def save_profile_to_file(self):
         """Save profile configuration to file"""
-        profile_name = self.profile_combo.currentData()
-        if not profile_name:
+        current_index = self.profile_combo.currentIndex()
+        if current_index < 0 or current_index >= len(self.profile_names):
             QMessageBox.warning(self, "Warning", "No profile selected")
             return
+            
+        profile_name = self.profile_names[current_index]
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -1276,3 +2158,57 @@ class MainWindow(QMainWindow):  # Changed from FluentWindow to QMainWindow
         if self.is_monitoring:
             self.stop_monitoring()
         event.accept()
+
+    def on_email_client_changed(self):
+        """Handle email client combo box change"""
+        client = self.email_client_combo.currentText()
+        # Show SMTP button only for smtp client (thunderbird uses SMTP but doesn't need separate config)
+        self.smtp_config_btn.setVisible(client == 'smtp')
+
+    def open_smtp_config_dialog(self):
+        """Open SMTP configuration dialog"""
+        try:
+            # Get current profile config to load existing SMTP settings
+            profile_config = self.config_manager.get_profile_config()
+
+            # Extract SMTP settings from profile config
+            smtp_config = {
+                'smtp_server': profile_config.get('smtp_server', ''),
+                'smtp_port': profile_config.get('smtp_port', 587),
+                'smtp_username': profile_config.get('smtp_username', ''),
+                'smtp_password': profile_config.get('smtp_password', ''),
+                'smtp_use_tls': profile_config.get('smtp_use_tls', True)
+            }
+
+            # Debug logging
+            self.logger.info(f"Loading SMTP config: {smtp_config}")
+
+            # Open dialog
+            dialog = SMTPConfigDialog(self, smtp_config)
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                # Save SMTP settings to profile config
+                new_smtp_config = dialog.get_config()
+
+                # Debug logging
+                self.logger.info(f"Saving SMTP config: {new_smtp_config}")
+
+                # Update profile config with new SMTP settings
+                profile_config.update(new_smtp_config)
+                self.config_manager.save_profile_config(
+                    self.config_manager.get_current_profile(),
+                    profile_config
+                )
+
+                InfoBar.success(
+                    title="SMTP Settings Saved",
+                    content="SMTP configuration has been saved successfully",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+
+        except Exception as e:
+            self.logger.error(f"Failed to open SMTP configuration dialog: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open SMTP configuration: {str(e)}")
