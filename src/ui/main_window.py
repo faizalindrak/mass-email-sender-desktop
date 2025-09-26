@@ -727,29 +727,38 @@ class MainWindow(FluentWindow):
 
         monitoring_card.viewLayout.addLayout(monitoring_hidden_layout)
 
-        # File Extensions Card
-        extensions_card = GroupHeaderCardWidget("File Types to Monitor")
-        extensions_layout = QVBoxLayout()
-        extensions_layout.setSpacing(8)
-        extensions_layout.setContentsMargins(12, 12, 12, 12)
+        # File Extensions Accordion
+        self.extensions_accordion = ExpandGroupSettingCard(FluentIcon.CHECKBOX, "File Types to Monitor")
+        # Increase the title height for better visibility
+        self.extensions_accordion.titleHeight = 50
 
-        # Extension controls
-        ext_controls_layout = QHBoxLayout()
-        ext_controls_layout.setSpacing(8)
-        self.scan_extensions_btn = PushButton(FluentIcon.SEARCH, "Scan Extensions")
+        # Extensions controls section
+        ext_controls_widget = QWidget()
+        ext_controls_widget.setMinimumHeight(100)  # Increase minimum height for more space
+        ext_controls_layout = QVBoxLayout(ext_controls_widget)
+        ext_controls_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        ext_controls_layout.setSpacing(0)  # No spacing between title and controls
+
+        # Top row: title and controls
+        ext_controls_top_layout = QHBoxLayout()
+        ext_controls_title = StrongBodyLabel("File Extensions")
+        self.scan_extensions_btn = PushButton(FluentIcon.SEARCH, "Scan")
         self.select_all_ext_btn = PushButton(FluentIcon.CHECKBOX, "Select All")
         self.clear_ext_btn = PushButton(FluentIcon.CANCEL, "Clear")
-        ext_controls_layout.addWidget(self.scan_extensions_btn)
-        ext_controls_layout.addWidget(self.select_all_ext_btn)
-        ext_controls_layout.addWidget(self.clear_ext_btn)
-        ext_controls_layout.addStretch()
-        extensions_layout.addLayout(ext_controls_layout)
+        ext_controls_top_layout.addWidget(ext_controls_title)
+        ext_controls_top_layout.addStretch()
+        ext_controls_top_layout.addWidget(self.scan_extensions_btn)
+        ext_controls_top_layout.addWidget(self.select_all_ext_btn)
+        ext_controls_top_layout.addWidget(self.clear_ext_btn)
 
+        # Bottom row: extensions widget
         self.extensions_widget = WrappingExtensionsWidget()
-        extensions_layout.addWidget(self.extensions_widget)
 
-        extensions_card.viewLayout.addLayout(extensions_layout)
-        layout.addWidget(extensions_card)
+        ext_controls_layout.addLayout(ext_controls_top_layout)
+        ext_controls_layout.addWidget(self.extensions_widget)
+        self.extensions_accordion.addGroupWidget(ext_controls_widget)
+
+        layout.addWidget(self.extensions_accordion)
 
         # Variables Card
         variables_card = GroupHeaderCardWidget("Constant Variables")
