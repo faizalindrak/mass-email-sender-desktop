@@ -16,7 +16,8 @@
     "accountsRead",
     "messagesRead",
     "storage",
-    "activeTab"
+    "activeTab",
+    "nativeMessaging"
   ],
   "background": {
     "scripts": ["background.js"]

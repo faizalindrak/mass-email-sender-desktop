@@ -609,12 +609,12 @@ class SMTPSender(EmailSenderBase):
             return False
 
 class ThunderbirdSender(EmailSenderBase):
-    """Thunderbird email sender using WebExtension API"""
+    """Thunderbird email sender using WebExtension API with Native Messaging"""
 
-    def __init__(self, extension_client=None, thunderbird_profile: Optional[str] = None,
+    def __init__(self, native_client=None, thunderbird_profile: Optional[str] = None,
                   save_to_thunderbird: bool = True):
         super().__init__()
-        self.extension_client = extension_client
+        self.native_client = native_client
         self.thunderbird_profile = thunderbird_profile
         self.save_to_thunderbird = save_to_thunderbird
         # Always create manager for auto-detection if profile not specified
@@ -636,23 +636,23 @@ class ThunderbirdSender(EmailSenderBase):
                 else:
                     self.logger.error(f"Attachment file does not exist: {attachment_path}")
 
-            # Check if WebExtension is available
-            if not self.extension_client:
-                self.logger.error("Thunderbird WebExtension client not initialized")
-                self.logger.info("This usually means the WebExtension is not installed or the Python client failed to initialize")
+            # Check if native messaging client is available
+            if not self.native_client:
+                self.logger.error("Thunderbird native messaging client not initialized")
+                self.logger.info("This usually means the native messaging host is not installed or configured")
                 return False
 
-            if not self.extension_client.is_connected():
-                self.logger.error("Thunderbird WebExtension not connected")
-                self.logger.info("DIAGNOSTIC: WebExtension connection failed")
+            if not self.native_client.is_connected():
+                self.logger.error("Thunderbird native messaging client not connected")
+                self.logger.info("DIAGNOSTIC: Native messaging connection failed")
                 self.logger.info("Please check:")
-                self.logger.info("1. Is the Thunderbird WebExtension installed?")
+                self.logger.info("1. Is the native messaging host installed?")
                 self.logger.info("2. Is Thunderbird running with the extension loaded?")
-                self.logger.info("3. Is the WebSocket server running on port 8765?")
-                self.logger.info("4. Are there any firewall blocking port 8765?")
+                self.logger.info("3. Is the native messaging host properly configured?")
+                self.logger.info("4. Try running: python -m src.utils.thunderbird_native_config install")
                 return False
 
-            self.logger.info("Thunderbird WebExtension is connected, proceeding with email send")
+            self.logger.info("Thunderbird native messaging is connected, proceeding with email send")
 
             # Prepare email data
             email_data = {
@@ -665,18 +665,18 @@ class ThunderbirdSender(EmailSenderBase):
                 'attachmentName': os.path.basename(attachment_path) if attachment_path else None
             }
 
-            # Send via WebExtension
+            # Send via native messaging
             import asyncio
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
             try:
                 result = loop.run_until_complete(
-                    self.extension_client.send_email(email_data)
+                    self.native_client.send_email(email_data)
                 )
 
                 if result.get('success'):
-                    self.logger.info(f"Email sent successfully via WebExtension to {', '.join(to_emails)}")
+                    self.logger.info(f"Email sent successfully via native messaging to {', '.join(to_emails)}")
 
                     # Save to Thunderbird Sent folder if enabled
                     if self.save_to_thunderbird and self.thunderbird_manager:
@@ -685,11 +685,11 @@ class ThunderbirdSender(EmailSenderBase):
                         )
 
                         if not thunderbird_success:
-                            self.logger.warning("Failed to save email to Thunderbird Sent folder, but WebExtension sending was successful")
+                            self.logger.warning("Failed to save email to Thunderbird Sent folder, but native messaging sending was successful")
 
                     return True
                 else:
-                    self.logger.error(f"WebExtension sending failed: {result.get('error')}")
+                    self.logger.error(f"Native messaging sending failed: {result.get('error')}")
                     return False
 
             finally:
@@ -718,21 +718,21 @@ class ThunderbirdSender(EmailSenderBase):
             return False
 
     def test_connection(self) -> bool:
-        """Test WebExtension connection"""
+        """Test native messaging connection"""
         try:
-            if self.extension_client:
+            if self.native_client:
                 import asyncio
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
                 try:
-                    available = loop.run_until_complete(self.extension_client.check_availability())
+                    available = loop.run_until_complete(self.native_client.check_availability())
                     return available
                 finally:
                     loop.close()
             return False
         except Exception as e:
-            self.logger.error(f"WebExtension connection test failed: {str(e)}")
+            self.logger.error(f"Native messaging connection test failed: {str(e)}")
             return False
 
 class EmailSenderFactory:
@@ -751,18 +751,27 @@ class EmailSenderFactory:
             thunderbird_profile = kwargs.get('thunderbird_profile')
             save_to_thunderbird = kwargs.get('save_to_thunderbird', True)
 
-            # Try to create WebExtension client
+            # Try to create native messaging client
             try:
-                from .thunderbird_extension_client import ThunderbirdExtensionClient
-                extension_client = ThunderbirdExtensionClient()
-                # Start websocket server for communication
-                extension_client.start_websocket_server()
+                from .thunderbird_native_client import ThunderbirdNativeClient
+                native_client = ThunderbirdNativeClient()
+                # Connect to native messaging host
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    connected = loop.run_until_complete(native_client.connect())
+                    if not connected:
+                        logging.warning("Failed to connect to native messaging host")
+                        native_client = None
+                finally:
+                    loop.close()
             except Exception as e:
-                logging.warning(f"Failed to create WebExtension client: {str(e)}")
-                extension_client = None
+                logging.warning(f"Failed to create native messaging client: {str(e)}")
+                native_client = None
 
             return ThunderbirdSender(
-                extension_client=extension_client,
+                native_client=native_client,
                 thunderbird_profile=thunderbird_profile,
                 save_to_thunderbird=bool(save_to_thunderbird)
             )

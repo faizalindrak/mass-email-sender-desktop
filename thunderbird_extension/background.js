@@ -1,66 +1,128 @@
 // Background script for Email Automation Thunderbird Extension
-// Handles communication with Python application and compose API
+// Handles communication with Python application via native messaging and compose API
 
-let pythonPort = null;
+let nativePort = null;
 let composeTabId = null;
 
-// Listen for connections from Python application
-browser.runtime.onConnect.addListener(function(port) {
-  if (port.name === "python-connection") {
-    pythonPort = port;
-
-    port.onMessage.addListener(function(message) {
-      handlePythonMessage(message);
-    });
-
-    port.onDisconnect.addListener(function() {
-      pythonPort = null;
-      console.log("Python connection disconnected");
-    });
-
-    console.log("Python connection established");
-  }
-});
-
-// Handle messages from Python application
-async function handlePythonMessage(message) {
+// Initialize native messaging connection
+function initializeNativeMessaging() {
   try {
-    console.log("Received message from Python:", message);
-
-    switch (message.action) {
-      case "sendEmail":
-        await sendEmailViaComposeAPI(message.emailData);
-        break;
-
-      case "checkComposeAvailability":
-        const available = await checkComposeAPIAvailability();
-        pythonPort.postMessage({
-          type: "composeAvailability",
-          available: available
-        });
-        break;
-
-      case "getAccounts":
-        const accounts = await getThunderbirdAccounts();
-        pythonPort.postMessage({
-          type: "accounts",
-          accounts: accounts
-        });
-        break;
-
-      default:
-        console.warn("Unknown action:", message.action);
-    }
+    // Connect to the native messaging host
+    nativePort = browser.runtime.connectNative("email_automation_native_host");
+    
+    nativePort.onMessage.addListener((message) => {
+      handleNativeMessage(message);
+    });
+    
+    nativePort.onDisconnect.addListener(() => {
+      if (browser.runtime.lastError) {
+        console.error("Native messaging disconnected:", browser.runtime.lastError.message);
+      }
+      nativePort = null;
+      console.log("Native messaging connection disconnected");
+    });
+    
+    console.log("Native messaging connection established");
   } catch (error) {
-    console.error("Error handling Python message:", error);
-    if (pythonPort) {
-      pythonPort.postMessage({
-        type: "error",
-        error: error.message
-      });
-    }
+    console.error("Failed to initialize native messaging:", error);
   }
 }
+
+// Handle messages from native messaging host
+async function handleNativeMessage(message) {
+  try {
+    console.log("Received message from native host:", message);
+
+    switch (message.type) {
+      case "emailSent":
+        handleEmailSentResponse(message);
+        break;
+        
+      case "availability":
+        handleAvailabilityResponse(message);
+        break;
+        
+      case "accounts":
+        handleAccountsResponse(message);
+        break;
+        
+      case "pong":
+        console.log("Received pong from native host");
+        break;
+        
+      case "error":
+        console.error("Error from native host:", message.error);
+        break;
+        
+      default:
+        console.warn("Unknown message type:", message.type);
+    }
+  } catch (error) {
+    console.error("Error handling native message:", error);
+  }
+}
+
+// Handle email sent response
+function handleEmailSentResponse(message) {
+  if (message.success) {
+    console.log("Email sent successfully:", message.messageId);
+  } else {
+    console.error("Failed to send email:", message.error);
+  }
+}
+
+// Handle availability response
+function handleAvailabilityResponse(message) {
+  console.log("Native host availability:", message.available);
+}
+
+// Handle accounts response
+function handleAccountsResponse(message) {
+  console.log("Received accounts:", message.accounts);
+}
+
+// Send message to native messaging host
+function sendToNativeHost(message) {
+  if (nativePort) {
+    try {
+      nativePort.postMessage(message);
+      console.log("Sent message to native host:", message);
+    } catch (error) {
+      console.error("Failed to send message to native host:", error);
+    }
+  } else {
+    console.error("Native messaging port not available");
+  }
+}
+
+// Send email via native messaging host
+async function sendEmailViaNativeHost(emailData) {
+  return new Promise((resolve, reject) => {
+    const requestId = Date.now().toString();
+    
+    // Store the promise for later resolution
+    const pendingRequest = {
+      resolve: resolve,
+      reject: reject,
+      timeout: setTimeout(() => {
+        delete pendingRequests[requestId];
+        reject(new Error("Timeout waiting for email send response"));
+      }, 30000) // 30 second timeout
+    };
+    
+    pendingRequests[requestId] = pendingRequest;
+    
+    // Send the email request
+    sendToNativeHost({
+      type: "sendEmail",
+      requestId: requestId,
+      emailData: emailData
+    });
+  });
+}
+
+// Store pending requests
+let pendingRequests = {};
 
 // Send email using Thunderbird Compose API
 async function sendEmailViaComposeAPI(emailData) {
@@ -83,10 +145,12 @@ async function sendEmailViaComposeAPI(emailData) {
     // Add attachment if provided
     if (emailData.attachmentPath) {
       try {
+        // For native messaging, we need to handle file paths differently
+        // The attachment path should be accessible to Thunderbird
         const attachment = await browser.compose.addAttachment(
           composeTabId,
           {
-            file: await fetch(emailData.attachmentPath).then(r => r.blob()),
+            file: emailData.attachmentPath,
             name: emailData.attachmentName || "attachment"
           }
         );
@@ -107,26 +171,22 @@ async function sendEmailViaComposeAPI(emailData) {
 
     console.log("Email sent successfully:", sendResult);
 
-    // Notify Python of success
-    if (pythonPort) {
-      pythonPort.postMessage({
-        type: "emailSent",
-        success: true,
-        messageId: sendResult.headerMessageId
-      });
-    }
+    // Notify native host of success
+    sendToNativeHost({
+      type: "emailSent",
+      success: true,
+      messageId: sendResult.headerMessageId
+    });
 
   } catch (error) {
     console.error("Error sending email via Compose API:", error);
 
-    // Notify Python of failure
-    if (pythonPort) {
-      pythonPort.postMessage({
-        type: "emailSent",
-        success: false,
-        error: error.message
-      });
-    }
+    // Notify native host of failure
+    sendToNativeHost({
+      type: "emailSent",
+      success: false,
+      error: error.message
+    });
   }
 }
 
@@ -139,20 +199,16 @@ function setupComposeEventListeners(tabId) {
 
       if (sendInfo.error) {
         console.error("Send error:", sendInfo.error);
-        if (pythonPort) {
-          pythonPort.postMessage({
-            type: "sendError",
-            error: sendInfo.error
-          });
-        }
+        sendToNativeHost({
+          type: "sendError",
+          error: sendInfo.error
+        });
       } else {
         console.log("Email sent successfully");
-        if (pythonPort) {
-          pythonPort.postMessage({
-            type: "sendSuccess",
-            messageId: sendInfo.headerMessageId
-          });
-        }
+        sendToNativeHost({
+          type: "sendSuccess",
+          messageId: sendInfo.headerMessageId
+        });
       }
     }
   });
@@ -221,10 +277,13 @@ browser.runtime.onStartup.addListener(() => {
   console.log("Email Automation Extension started");
 });
 
+// Initialize native messaging when extension starts
+initializeNativeMessaging();
+
 // Periodic health check
 setInterval(() => {
-  if (pythonPort) {
-    pythonPort.postMessage({
+  if (nativePort) {
+    sendToNativeHost({
       type: "ping",
       timestamp: Date.now()
     });

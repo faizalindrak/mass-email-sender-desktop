@@ -1,0 +1,7 @@
+{
+  "name": "email_automation_native_host",
+  "description": "Email Automation Native Messaging Host",
+  "path": "python",
+  "type": "stdio",
+  "allowed_extensions": ["email-automation@thunderbird"]
+}
