@@ -2,10 +2,11 @@ import sys
 import os
 import time
 import json
+import re
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                               QGridLayout, QSplitter, QTabWidget,
-                               QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
-                               QFileDialog, QMessageBox)
+                                QGridLayout, QSplitter, QTabWidget,
+                                QTableWidget, QTableWidgetItem, QListWidget, QListWidgetItem,
+                                QFileDialog, QMessageBox, QDialog)
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QIcon, QFont
 
@@ -28,6 +29,153 @@ from core.template_engine import EmailTemplateEngine
 from utils.logger import setup_logger
 from utils.resources import get_resource_path
 from ui.smtp_config_dialog import SMTPConfigDialog
+
+class KeyPatternDialog(QDialog):
+    """Dialog for editing key pattern regex"""
+
+    def __init__(self, parent=None, current_pattern=""):
+        super().__init__(parent)
+        self.current_pattern = current_pattern
+        self.setWindowTitle("Edit Key Pattern")
+        self.setModal(True)
+        self.resize(500, 150)
+
+        # Set window icon if available
+        try:
+            icon_path = get_resource_path('icon.ico')
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception:
+            pass
+
+        self.init_ui()
+        self.init_connections()
+
+    def init_ui(self):
+        """Initialize dialog UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
+
+        # Title
+        title_label = SubtitleLabel("Key Pattern (Regex)")
+        layout.addWidget(title_label)
+
+        # Description
+        desc_label = BodyLabel("Enter a regular expression pattern to extract keys from filenames.\nExample: ([A-Z]{2}\\d{3}) for patterns like 'TT003_invoice.pdf'")
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        layout.addSpacing(8)
+
+        # Pattern input
+        input_layout = QHBoxLayout()
+        input_label = StrongBodyLabel("Pattern:")
+        self.pattern_edit = LineEdit()
+        self.pattern_edit.setText(self.current_pattern)
+        self.pattern_edit.setPlaceholderText("Enter regex pattern...")
+        self.pattern_edit.setMinimumWidth(250)
+        self.test_pattern_btn = PushButton(FluentIcon.SEARCH, "Test")
+        self.test_pattern_btn.setFixedWidth(80)
+        input_layout.addWidget(input_label)
+        input_layout.addWidget(self.pattern_edit)
+        input_layout.addWidget(self.test_pattern_btn)
+        layout.addLayout(input_layout)
+
+        # Test result label
+        self.test_result_label = CaptionLabel("")
+        self.test_result_label.setWordWrap(True)
+        layout.addWidget(self.test_result_label)
+
+        layout.addSpacing(16)
+
+        # Buttons
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+
+        self.save_btn = PrimaryPushButton(FluentIcon.SAVE, "Save")
+        self.cancel_btn = PushButton(FluentIcon.CANCEL, "Cancel")
+
+        buttons_layout.addWidget(self.save_btn)
+        buttons_layout.addWidget(self.cancel_btn)
+        layout.addLayout(buttons_layout)
+
+    def init_connections(self):
+        """Initialize signal connections"""
+        self.save_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.pattern_edit.textChanged.connect(self.validate_pattern)
+        self.test_pattern_btn.clicked.connect(self.test_pattern)
+
+    def validate_pattern(self):
+        """Validate the regex pattern"""
+        pattern = self.pattern_edit.text().strip()
+        if pattern:
+            try:
+                # Test compile the regex
+                re.compile(pattern)
+                # Valid pattern - show success styling
+                self.pattern_edit.setStyleSheet("border: 2px solid #107c10;")
+                self.save_btn.setEnabled(True)
+            except re.error as e:
+                # Invalid pattern - show error styling
+                self.pattern_edit.setStyleSheet("border: 2px solid #d73527;")
+                self.save_btn.setEnabled(False)
+                # Could add tooltip with error message
+                self.pattern_edit.setToolTip(f"Invalid regex: {str(e)}")
+        else:
+            # Empty pattern - reset styling
+            self.pattern_edit.setStyleSheet("")
+            self.pattern_edit.setToolTip("")
+            self.save_btn.setEnabled(True)
+
+    def get_pattern(self):
+        """Get the entered pattern"""
+        return self.pattern_edit.text().strip()
+
+    def test_pattern(self):
+        """Test the regex pattern with sample filenames"""
+        pattern = self.pattern_edit.text().strip()
+        if not pattern:
+            self.test_result_label.setText("Please enter a pattern to test.")
+            self.test_result_label.setStyleSheet("color: #d73527;")
+            return
+
+        try:
+            # Compile the regex
+            compiled_pattern = re.compile(pattern)
+
+            # Sample filenames to test
+            test_files = [
+                "TT003_invoice_2024.pdf",
+                "AB001_delivery_schedule.xlsx",
+                "XY999_report.docx",
+                "invalid_filename.txt",
+                "TT003_followup_email.pdf"
+            ]
+
+            # Test the pattern
+            matches = []
+            for filename in test_files:
+                match = compiled_pattern.search(filename)
+                if match:
+                    # Get the first capture group if it exists, otherwise the whole match
+                    if match.groups():
+                        extracted = match.group(1)
+                    else:
+                        extracted = match.group(0)
+                    matches.append(f"✓ {filename} → '{extracted}'")
+                else:
+                    matches.append(f"✗ {filename} → No match")
+
+            # Display results
+            result_text = "Pattern test results:\n" + "\n".join(matches)
+            self.test_result_label.setText(result_text)
+            self.test_result_label.setStyleSheet("color: #107c10;")
+
+        except re.error as e:
+            self.test_result_label.setText(f"Invalid regex pattern: {str(e)}")
+            self.test_result_label.setStyleSheet("color: #d73527;")
 
 class EmailAutomationWorker(QThread):
     """Worker thread for email automation"""
@@ -382,6 +530,8 @@ class MainWindow(FluentWindow):
 
         # Create accordion for system paths
         self.system_paths_accordion = ExpandGroupSettingCard(FluentIcon.FOLDER, "System Paths")
+        # Increase the title height for better visibility
+        self.system_paths_accordion.titleHeight = 50
 
         # Database path section
         db_widget = QWidget()
@@ -437,75 +587,145 @@ class MainWindow(FluentWindow):
 
         layout.addWidget(self.system_paths_accordion)
 
-        # Fix accordion issue by reconnecting signals after accordion is created
-        QTimer.singleShot(100, self.reconnect_browse_signals)
+        # Create accordion for monitoring settings
+        self.monitoring_accordion = ExpandGroupSettingCard(FluentIcon.VIEW, "Monitoring Settings")
+        # Increase the title height for better visibility
+        self.monitoring_accordion.titleHeight = 50
 
-        # Monitoring Settings Card
-        monitoring_card = GroupHeaderCardWidget("Monitoring Settings")
-        monitoring_layout = QVBoxLayout()
-        monitoring_layout.setSpacing(8)
-        monitoring_layout.setContentsMargins(12, 12, 12, 12)
+        # Monitor folder section
+        monitor_widget = QWidget()
+        monitor_widget.setMinimumHeight(60)  # Increase minimum height for vertical layout
+        monitor_layout = QVBoxLayout(monitor_widget)
+        monitor_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        monitor_layout.setSpacing(0)  # No spacing between title and path
 
-        # Monitor folder row
-        monitor_grid = QGridLayout()
-        monitor_grid.setSpacing(8)
-        monitor_label = StrongBodyLabel("Monitor Folder:")
-        self.monitor_folder_edit = LineEdit()
-        self.monitor_folder_edit.setPlaceholderText("Select folder to monitor...")
-        self.monitor_folder_edit.setMinimumWidth(300)
+        # Top row: title and browse button
+        monitor_top_layout = QHBoxLayout()
+        monitor_title = StrongBodyLabel("Monitor Folder")
         self.browse_monitor_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_monitor_btn.setFixedWidth(100)
-        monitor_grid.addWidget(monitor_label, 0, 0)
-        monitor_grid.addWidget(self.monitor_folder_edit, 0, 1)
-        monitor_grid.addWidget(self.browse_monitor_btn, 0, 2)
-        monitor_grid.setColumnStretch(1, 1)
-        monitoring_layout.addLayout(monitor_grid)
+        self.browse_monitor_btn.setEnabled(True)
+        self.browse_monitor_btn.clicked.connect(self.browse_monitor_folder)
+        monitor_top_layout.addWidget(monitor_title)
+        monitor_top_layout.addStretch()
+        monitor_top_layout.addWidget(self.browse_monitor_btn)
 
-        # Sent folder row
-        sent_grid = QGridLayout()
-        sent_grid.setSpacing(8)
-        sent_label = StrongBodyLabel("Sent Folder:")
-        self.sent_folder_edit = LineEdit()
-        self.sent_folder_edit.setPlaceholderText("Select sent files folder...")
-        self.sent_folder_edit.setMinimumWidth(300)
+        # Bottom row: path label
+        self.monitor_path_label = CaptionLabel("Not selected")
+        self.monitor_path_label.setWordWrap(True)
+
+        monitor_layout.addLayout(monitor_top_layout)
+        monitor_layout.addWidget(self.monitor_path_label)
+        self.monitoring_accordion.addGroupWidget(monitor_widget)
+
+        # Sent folder section
+        sent_widget = QWidget()
+        sent_widget.setMinimumHeight(60)  # Increase minimum height for vertical layout
+        sent_layout = QVBoxLayout(sent_widget)
+        sent_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        sent_layout.setSpacing(0)  # No spacing between title and path
+
+        # Top row: title and browse button
+        sent_top_layout = QHBoxLayout()
+        sent_title = StrongBodyLabel("Sent Folder")
         self.browse_sent_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_sent_btn.setFixedWidth(100)
-        sent_grid.addWidget(sent_label, 0, 0)
-        sent_grid.addWidget(self.sent_folder_edit, 0, 1)
-        sent_grid.addWidget(self.browse_sent_btn, 0, 2)
-        sent_grid.setColumnStretch(1, 1)
-        monitoring_layout.addLayout(sent_grid)
+        self.browse_sent_btn.setEnabled(True)
+        self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
+        sent_top_layout.addWidget(sent_title)
+        sent_top_layout.addStretch()
+        sent_top_layout.addWidget(self.browse_sent_btn)
 
-        # Key pattern row
-        pattern_grid = QGridLayout()
-        pattern_grid.setSpacing(8)
-        pattern_label = StrongBodyLabel("Key Pattern (Regex):")
-        self.key_pattern_edit = LineEdit()
-        self.key_pattern_edit.setPlaceholderText("Enter regex pattern to extract keys from filenames...")
-        self.key_pattern_edit.setMinimumWidth(300)
-        pattern_grid.addWidget(pattern_label, 0, 0)
-        pattern_grid.addWidget(self.key_pattern_edit, 0, 1)
-        pattern_grid.setColumnStretch(1, 1)
-        monitoring_layout.addLayout(pattern_grid)
+        # Bottom row: path label
+        self.sent_path_label = CaptionLabel("Not selected")
+        self.sent_path_label.setWordWrap(True)
 
-        # Email client row
-        client_grid = QGridLayout()
-        client_grid.setSpacing(8)
-        client_label = StrongBodyLabel("Email Client:")
+        sent_layout.addLayout(sent_top_layout)
+        sent_layout.addWidget(self.sent_path_label)
+        self.monitoring_accordion.addGroupWidget(sent_widget)
+
+        # Key pattern section
+        pattern_widget = QWidget()
+        pattern_widget.setMinimumHeight(60)  # Increase minimum height for vertical layout
+        pattern_layout = QVBoxLayout(pattern_widget)
+        pattern_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        pattern_layout.setSpacing(0)  # No spacing between title and path
+
+        # Top row: title and edit button
+        pattern_top_layout = QHBoxLayout()
+        pattern_title = StrongBodyLabel("Key Pattern (Regex)")
+        self.edit_key_pattern_btn = PushButton(FluentIcon.EDIT, "Edit")
+        self.edit_key_pattern_btn.setFixedWidth(100)
+        self.edit_key_pattern_btn.setEnabled(True)
+        self.edit_key_pattern_btn.clicked.connect(self.open_key_pattern_dialog)
+        pattern_top_layout.addWidget(pattern_title)
+        pattern_top_layout.addStretch()
+        pattern_top_layout.addWidget(self.edit_key_pattern_btn)
+
+        # Bottom row: pattern label
+        self.key_pattern_label = CaptionLabel("Not set")
+        self.key_pattern_label.setWordWrap(True)
+
+        pattern_layout.addLayout(pattern_top_layout)
+        pattern_layout.addWidget(self.key_pattern_label)
+        self.monitoring_accordion.addGroupWidget(pattern_widget)
+
+        # Email client section
+        client_widget = QWidget()
+        client_widget.setMinimumHeight(60)  # Increase minimum height for vertical layout
+        client_layout = QVBoxLayout(client_widget)
+        client_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        client_layout.setSpacing(0)  # No spacing between title and path
+
+        # Top row: title and config button
+        client_top_layout = QHBoxLayout()
+        client_title = StrongBodyLabel("Email Client")
         self.email_client_combo = ComboBox()
         self.email_client_combo.addItems(["outlook", "thunderbird", "smtp"])
         self.email_client_combo.setMinimumWidth(200)
         self.smtp_config_btn = PushButton(FluentIcon.SETTING, "Set SMTP")
         self.smtp_config_btn.setMinimumWidth(100)
         self.smtp_config_btn.clicked.connect(self.open_smtp_config_dialog)
-        client_grid.addWidget(client_label, 0, 0)
-        client_grid.addWidget(self.email_client_combo, 0, 1)
-        client_grid.addWidget(self.smtp_config_btn, 0, 2)
-        client_grid.setColumnStretch(1, 1)
-        monitoring_layout.addLayout(client_grid)
+        client_top_layout.addWidget(client_title)
+        client_top_layout.addStretch()
+        client_top_layout.addWidget(self.email_client_combo)
+        client_top_layout.addWidget(self.smtp_config_btn)
 
-        monitoring_card.viewLayout.addLayout(monitoring_layout)
-        layout.addWidget(monitoring_card)
+        client_layout.addLayout(client_top_layout)
+        self.monitoring_accordion.addGroupWidget(client_widget)
+
+        layout.addWidget(self.monitoring_accordion)
+
+        # Fix accordion issue by reconnecting signals after accordion is created
+        QTimer.singleShot(100, self.reconnect_browse_signals)
+
+        # Initialize monitoring path labels after accordion is created
+        QTimer.singleShot(200, self.update_monitoring_path_labels)
+
+        # Monitoring Settings Card (now contains main UI edit fields for monitoring)
+        monitoring_card = GroupHeaderCardWidget("Additional Settings")
+
+        # Hidden edit fields for monitoring settings (used by main UI logic)
+        monitoring_hidden_layout = QVBoxLayout()
+        monitoring_hidden_layout.setSpacing(8)
+        monitoring_hidden_layout.setContentsMargins(12, 12, 12, 12)
+
+        # Monitor folder edit field (hidden from user, used by code)
+        self.monitor_folder_edit = LineEdit()
+        self.monitor_folder_edit.setVisible(False)  # Hide from user
+        monitoring_hidden_layout.addWidget(self.monitor_folder_edit)
+
+        # Sent folder edit field (hidden from user, used by code)
+        self.sent_folder_edit = LineEdit()
+        self.sent_folder_edit.setVisible(False)  # Hide from user
+        monitoring_hidden_layout.addWidget(self.sent_folder_edit)
+
+        # Key pattern edit field (hidden from user, used by code)
+        self.key_pattern_edit = LineEdit()
+        self.key_pattern_edit.setVisible(False)  # Hide from user
+        monitoring_hidden_layout.addWidget(self.key_pattern_edit)
+
+        monitoring_card.viewLayout.addLayout(monitoring_hidden_layout)
 
         # File Extensions Card
         extensions_card = GroupHeaderCardWidget("File Types to Monitor")
@@ -1185,10 +1405,10 @@ class MainWindow(FluentWindow):
 
     def init_connections(self):
         """Initialize signal connections"""
-        # Buttons
+        # Buttons - only connect main UI buttons, not accordion buttons
         self.toggle_monitoring_btn.clicked.connect(self.toggle_monitoring)
-        self.browse_monitor_btn.clicked.connect(self.browse_monitor_folder)
-        self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
+        # Note: browse_monitor_btn and browse_sent_btn are now in the accordion
+        # They are connected directly in the accordion creation code
         # Temporarily disconnect browse buttons to test if accordion is causing the issue
         # self.browse_database_btn.clicked.connect(self.browse_database_file)
         # self.browse_template_btn.clicked.connect(self.browse_template_folder)
@@ -1209,7 +1429,11 @@ class MainWindow(FluentWindow):
         self.profile_combo.currentTextChanged.connect(self.load_profile_config)
 
         # Email client combo
-        self.email_client_combo.currentTextChanged.connect(self.on_email_client_changed)
+        if hasattr(self, 'email_client_combo'):
+            self.email_client_combo.currentTextChanged.connect(self.on_email_client_changed)
+
+        # Key pattern edit - no need to connect to path labels since it's not a path
+        # The key pattern edit field is still needed for the main UI functionality
 
         # Worker signals
         self.worker.file_processed.connect(self.on_file_processed)
@@ -1254,9 +1478,19 @@ class MainWindow(FluentWindow):
             self.tpl_path_label.setText(template_dir)
             
             # Other folders and pattern
-            self.monitor_folder_edit.setText(config.get('monitor_folder', ''))
-            self.sent_folder_edit.setText(config.get('sent_folder', ''))
-            self.key_pattern_edit.setText(config.get('key_pattern', ''))
+            if hasattr(self, 'monitor_folder_edit') and self.monitor_folder_edit:
+                self.monitor_folder_edit.setText(config.get('monitor_folder', ''))
+            if hasattr(self, 'sent_folder_edit') and self.sent_folder_edit:
+                self.sent_folder_edit.setText(config.get('sent_folder', ''))
+            if hasattr(self, 'key_pattern_edit') and self.key_pattern_edit:
+                self.key_pattern_edit.setText(config.get('key_pattern', ''))
+
+            # Update accordion path labels
+            self.update_monitoring_path_labels()
+            self.logger.info("Updated monitoring path labels after loading profile config")
+
+            # Update key pattern label specifically
+            self.update_key_pattern_label()
 
             # Set email client
             client = config.get('email_client', 'outlook')
@@ -1342,33 +1576,185 @@ class MainWindow(FluentWindow):
 
     def browse_monitor_folder(self):
         """Browse for monitor folder"""
-        folder = QFileDialog.getExistingDirectory(self, "Select Monitor Folder")
-        if folder:
-            self.monitor_folder_edit.setText(folder)
-            # Auto-set sent folder to be inside monitor folder if not already set
-            if not self.sent_folder_edit.text():
-                sent_folder = os.path.join(folder, "sent")
-                self.sent_folder_edit.setText(sent_folder)
-            # Scan and populate available file extensions from selected folder
-            try:
-                self.scan_monitor_folder_extensions(preselected=self.config_manager.get_profile_config().get('file_extensions', []))
-            except Exception as _:
-                pass
+        # Prevent dialog from opening multiple times
+        if hasattr(self, '_browse_monitor_in_progress') and self._browse_monitor_in_progress:
+            self.logger.warning("Browse monitor dialog already in progress, ignoring")
+            return
+        self._browse_monitor_in_progress = True
+
+        self.logger.info("Starting browse monitor folder dialog")
+        try:
+            folder = QFileDialog.getExistingDirectory(self, "Select Monitor Folder")
+            self.logger.info(f"Selected monitor folder: {folder}")
+            if folder:
+                # Update the main UI edit field (not the accordion one)
+                if hasattr(self, 'monitor_folder_edit') and self.monitor_folder_edit:
+                    self.monitor_folder_edit.setText(folder)
+                    self.logger.info(f"Updated monitor_folder_edit to: {folder}")
+                # Auto-set sent folder to be inside monitor folder if not already set
+                if hasattr(self, 'sent_folder_edit') and self.sent_folder_edit and not self.sent_folder_edit.text():
+                    sent_folder = os.path.join(folder, "sent")
+                    self.sent_folder_edit.setText(sent_folder)
+                    self.logger.info(f"Auto-set sent folder to: {sent_folder}")
+                # Update path labels immediately
+                self.update_monitoring_path_labels()
+                # Save the configuration immediately like database path does
+                try:
+                    self.save_current_config()
+                    self.logger.info("Successfully saved monitor folder config")
+                    InfoBar.success(
+                        title="Monitor Folder Updated",
+                        content=f"Monitor folder set to: {folder}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to save monitor folder config: {str(e)}")
+                # Scan and populate available file extensions from selected folder
+                try:
+                    self.scan_monitor_folder_extensions(preselected=self.config_manager.get_profile_config().get('file_extensions', []))
+                except Exception as _:
+                    pass
+        finally:
+            self._browse_monitor_in_progress = False
+            self.logger.info("Finished browse monitor folder dialog")
 
     def browse_sent_folder(self):
         """Browse for sent folder"""
-        monitor_folder = self.monitor_folder_edit.text().strip()
+        # Prevent dialog from opening multiple times
+        if hasattr(self, '_browse_sent_in_progress') and self._browse_sent_in_progress:
+            self.logger.warning("Browse sent dialog already in progress, ignoring")
+            return
+        self._browse_sent_in_progress = True
 
-        # Default to sent folder inside monitor folder
-        default_sent = os.path.join(monitor_folder, "sent") if monitor_folder else ""
+        self.logger.info("Starting browse sent folder dialog")
+        try:
+            monitor_folder = ""
+            if hasattr(self, 'monitor_folder_edit') and self.monitor_folder_edit:
+                monitor_folder = self.monitor_folder_edit.text().strip()
+                self.logger.info(f"Current monitor folder: {monitor_folder}")
 
-        folder = QFileDialog.getExistingDirectory(self, "Select Sent Folder", default_sent)
-        if folder:
-            self.sent_folder_edit.setText(folder)
-        elif monitor_folder and not self.sent_folder_edit.text():
-            # Auto-create sent folder inside monitor folder if not selected
-            sent_folder = os.path.join(monitor_folder, "sent")
-            self.sent_folder_edit.setText(sent_folder)
+            # Default to sent folder inside monitor folder
+            default_sent = os.path.join(monitor_folder, "sent") if monitor_folder else ""
+            self.logger.info(f"Default sent folder: {default_sent}")
+
+            folder = QFileDialog.getExistingDirectory(self, "Select Sent Folder", default_sent)
+            self.logger.info(f"Selected sent folder: {folder}")
+            if folder:
+                # Update the main UI edit field (not the accordion one)
+                if hasattr(self, 'sent_folder_edit') and self.sent_folder_edit:
+                    self.sent_folder_edit.setText(folder)
+                    self.logger.info(f"Updated sent_folder_edit to: {folder}")
+                # Save the configuration immediately like database path does
+                try:
+                    self.save_current_config()
+                    self.logger.info("Successfully saved sent folder config")
+                    InfoBar.success(
+                        title="Sent Folder Updated",
+                        content=f"Sent folder set to: {folder}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to save sent folder config: {str(e)}")
+            elif monitor_folder and hasattr(self, 'sent_folder_edit') and self.sent_folder_edit and not self.sent_folder_edit.text():
+                # Auto-create sent folder inside monitor folder if not selected
+                sent_folder = os.path.join(monitor_folder, "sent")
+                self.sent_folder_edit.setText(sent_folder)
+                self.logger.info(f"Auto-created sent folder: {sent_folder}")
+                # Save the configuration immediately
+                try:
+                    self.save_current_config()
+                    self.logger.info("Successfully saved auto-created sent folder config")
+                    InfoBar.success(
+                        title="Sent Folder Updated",
+                        content=f"Sent folder set to: {sent_folder}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to save sent folder config: {str(e)}")
+
+            # Update path labels
+            self.update_monitoring_path_labels()
+        finally:
+            self._browse_sent_in_progress = False
+            self.logger.info("Finished browse sent folder dialog")
+
+    def open_key_pattern_dialog(self):
+        """Open key pattern editing dialog"""
+        try:
+            # Get current pattern from the hidden edit field
+            current_pattern = ""
+            if hasattr(self, 'key_pattern_edit') and self.key_pattern_edit:
+                current_pattern = self.key_pattern_edit.text().strip()
+                self.logger.info(f"Current key pattern: {current_pattern}")
+
+            # Open dialog
+            dialog = KeyPatternDialog(self, current_pattern)
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                new_pattern = dialog.get_pattern()
+                self.logger.info(f"New key pattern: {new_pattern}")
+
+                # Update the hidden edit field
+                if hasattr(self, 'key_pattern_edit') and self.key_pattern_edit:
+                    self.key_pattern_edit.setText(new_pattern)
+
+                # Update the label
+                self.update_key_pattern_label()
+
+                # Save the configuration immediately
+                try:
+                    self.save_current_config()
+                    self.logger.info("Successfully saved key pattern config")
+                    InfoBar.success(
+                        title="Key Pattern Updated",
+                        content=f"Key pattern set to: {new_pattern}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to save key pattern config: {str(e)}")
+                    InfoBar.error(
+                        title="Save Failed",
+                        content=f"Failed to save key pattern: {str(e)}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Failed to open key pattern dialog: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to open key pattern editor: {str(e)}")
+
+    def update_key_pattern_label(self):
+        """Update key pattern label from stored value"""
+        if hasattr(self, 'key_pattern_label'):
+            # Get current value from the hidden edit field
+            pattern = ""
+            if hasattr(self, 'key_pattern_edit') and self.key_pattern_edit:
+                pattern = self.key_pattern_edit.text().strip()
+
+            # Update label with current value
+            self.key_pattern_label.setText(pattern if pattern else "Not set")
+            self.logger.info(f"Updated key pattern label to: {pattern if pattern else 'Not set'}")
+
+            # Force UI update
+            self.key_pattern_label.repaint()
 
     def scan_monitor_folder_extensions(self, preselected=None):
         """Scan the monitoring folder and populate available file extensions"""
@@ -2201,6 +2587,38 @@ class MainWindow(FluentWindow):
         client = self.email_client_combo.currentText()
         # Show SMTP button only for smtp client (thunderbird uses WebExtension, not SMTP)
         self.smtp_config_btn.setVisible(client == 'smtp')
+
+        # Update accordion path labels when email client changes
+        self.update_monitoring_path_labels()
+
+    def update_monitoring_path_labels(self):
+        """Update monitoring path labels from stored values"""
+        if hasattr(self, 'monitor_path_label') and hasattr(self, 'sent_path_label'):
+            # Get current values from the actual edit fields in the main UI
+            monitor_folder = ""
+            sent_folder = ""
+
+            # Try to get from the main UI edit fields if they exist
+            if hasattr(self, 'monitor_folder_edit') and self.monitor_folder_edit:
+                monitor_folder = self.monitor_folder_edit.text()
+                self.logger.info(f"Monitor folder from UI: {monitor_folder}")
+            if hasattr(self, 'sent_folder_edit') and self.sent_folder_edit:
+                sent_folder = self.sent_folder_edit.text()
+                self.logger.info(f"Sent folder from UI: {sent_folder}")
+
+            # Update labels with current values
+            self.monitor_path_label.setText(monitor_folder if monitor_folder else "Not selected")
+            self.sent_path_label.setText(sent_folder if sent_folder else "Not selected")
+
+            self.logger.info(f"Updated monitor path label to: {monitor_folder if monitor_folder else 'Not selected'}")
+            self.logger.info(f"Updated sent path label to: {sent_folder if sent_folder else 'Not selected'}")
+
+            # Force UI update
+            self.monitor_path_label.repaint()
+            self.sent_path_label.repaint()
+
+        # Also update key pattern label
+        self.update_key_pattern_label()
 
     def open_smtp_config_dialog(self):
         """Open SMTP configuration dialog"""

@@ -13,3 +13,4 @@ logs/app.log
 templates/default_template.html
 database/db_import.csv
 logs/app.log
+database/*.html
