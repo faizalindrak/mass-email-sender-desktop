@@ -487,6 +487,127 @@ class ThunderbirdProfileManager:
         # Fallback: return a generic address
         return "sender@example.com"
 
+class SMTPSender(EmailSenderBase):
+    """Pure SMTP email sender without Thunderbird integration"""
+
+    def __init__(self, smtp_server: str, smtp_port: int, username: str, password: str,
+                 use_tls: bool = True):
+        super().__init__()
+        self.smtp_server = smtp_server
+        self.smtp_port = smtp_port
+        self.username = username
+        self.password = password
+        self.use_tls = use_tls
+        self.logger = logging.getLogger(__name__)
+
+    def send_email(self, to_emails: List[str], cc_emails: List[str] = None,
+                   bcc_emails: List[str] = None, subject: str = "", body: str = "",
+                   attachment_path: Optional[str] = None) -> bool:
+        """Send email via SMTP"""
+        try:
+            # Create message
+            msg = MIMEMultipart()
+            msg['From'] = self.username
+            msg['To'] = ', '.join(to_emails)
+            if cc_emails:
+                msg['Cc'] = ', '.join(cc_emails)
+            msg['Subject'] = subject
+
+            # Attach HTML body
+            msg.attach(MIMEText(body, 'html'))
+
+            # Add attachment if provided
+            if attachment_path and os.path.exists(attachment_path):
+                self.logger.info(f"Adding attachment: {attachment_path}")
+
+                # Validate attachment
+                if not os.path.isfile(attachment_path):
+                    self.logger.error(f"Attachment path is not a file: {attachment_path}")
+                    return False
+
+                file_size = os.path.getsize(attachment_path)
+                max_size = 25 * 1024 * 1024  # 25MB limit
+                if file_size > max_size:
+                    self.logger.error(f"Attachment file too large: {file_size} bytes (max: {max_size} bytes)")
+                    return False
+
+                try:
+                    with open(attachment_path, "rb") as attachment:
+                        part = MIMEBase('application', 'octet-stream')
+                        part.set_payload(attachment.read())
+                        encoders.encode_base64(part)
+                        part.add_header(
+                            'Content-Disposition',
+                            f'attachment; filename= {os.path.basename(attachment_path)}'
+                        )
+                        msg.attach(part)
+                        self.logger.info(f"Attachment added successfully: {os.path.basename(attachment_path)}")
+                except Exception as e:
+                    self.logger.error(f"Failed to add attachment: {str(e)}")
+                    return False
+
+            # Send email
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.ehlo()
+
+            if self.use_tls:
+                server.starttls()
+                server.ehlo()
+
+            server.login(self.username, self.password)
+
+            # Get all recipients
+            all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
+
+            # Send email
+            server.sendmail(self.username, all_recipients, msg.as_string())
+            server.quit()
+
+            self.logger.info(f"Email sent successfully via SMTP to {', '.join(to_emails)}")
+            return True
+
+        except smtplib.SMTPAuthenticationError as e:
+            self.logger.error(f"SMTP authentication failed: {str(e)}")
+            return False
+        except smtplib.SMTPConnectError as e:
+            self.logger.error(f"SMTP connection failed: {str(e)}")
+            return False
+        except smtplib.SMTPException as e:
+            self.logger.error(f"SMTP error: {str(e)}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to send email via SMTP: {str(e)}")
+            return False
+
+    def test_connection(self) -> bool:
+        """Test SMTP connection"""
+        try:
+            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+            server.ehlo()
+
+            if self.use_tls:
+                server.starttls()
+                server.ehlo()
+
+            server.login(self.username, self.password)
+            server.quit()
+
+            self.logger.info("SMTP connection test successful")
+            return True
+
+        except smtplib.SMTPAuthenticationError:
+            self.logger.error("SMTP authentication failed")
+            return False
+        except smtplib.SMTPConnectError:
+            self.logger.error("SMTP connection failed")
+            return False
+        except smtplib.SMTPException:
+            self.logger.error("SMTP connection test failed")
+            return False
+        except Exception as e:
+            self.logger.error(f"SMTP connection test error: {str(e)}")
+            return False
+
 class ThunderbirdSender(EmailSenderBase):
     """Thunderbird email sender using WebExtension API"""
 
@@ -625,7 +746,7 @@ class EmailSenderFactory:
         if client == 'outlook':
             return OutlookSender()
 
-        elif client in ('thunderbird', 'smtp', 'thunderbird smtp'):
+        elif client == 'thunderbird':
             # Thunderbird-specific parameters
             thunderbird_profile = kwargs.get('thunderbird_profile')
             save_to_thunderbird = kwargs.get('save_to_thunderbird', True)
@@ -646,6 +767,26 @@ class EmailSenderFactory:
                 save_to_thunderbird=bool(save_to_thunderbird)
             )
 
+        elif client == 'smtp':
+            # SMTP-specific parameters
+            smtp_server = kwargs.get('smtp_server')
+            smtp_port = kwargs.get('smtp_port', 587)
+            # Handle both smtp_username/smtp_password (from config) and username/password (direct)
+            username = kwargs.get('username') or kwargs.get('smtp_username')
+            password = kwargs.get('password') or kwargs.get('smtp_password')
+            use_tls = kwargs.get('use_tls', kwargs.get('smtp_use_tls', True))
+
+            if not all([smtp_server, username, password]):
+                raise ValueError("SMTP requires smtp_server, username, and password parameters")
+
+            return SMTPSender(
+                smtp_server=smtp_server,
+                smtp_port=int(smtp_port),
+                username=username,
+                password=password,
+                use_tls=bool(use_tls)
+            )
+
         else:
             raise ValueError(f"Unsupported email client type: {client_type}")
 
@@ -661,9 +802,8 @@ class EmailSenderFactory:
         except:
             pass
 
-        # Thunderbird options (SMTP with and without history)
+        # Thunderbird and SMTP options (separate)
         available.append('thunderbird')
         available.append('smtp')
-        available.append('thunderbird smtp')
 
         return available

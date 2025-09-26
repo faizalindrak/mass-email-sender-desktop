@@ -236,12 +236,12 @@ class ConfigManager:
         if str(config_data["email_client"]).lower() not in valid_clients:
             return False, f"Invalid email client. Must be one of: {', '.join(valid_clients)}"
 
-        # Validate SMTP settings if using thunderbird/smtp
-        if str(config_data["email_client"]).lower() in ["thunderbird", "smtp"]:
+        # Validate SMTP settings if using smtp client
+        if str(config_data["email_client"]).lower() == "smtp":
             smtp_required = ["smtp_server", "smtp_port", "smtp_username", "smtp_password"]
             for field in smtp_required:
                 if field not in config_data or not config_data[field]:
-                    return False, f"SMTP field '{field}' is required for thunderbird/smtp client"
+                    return False, f"SMTP field '{field}' is required for smtp client"
 
         # Validate regex pattern
         try:

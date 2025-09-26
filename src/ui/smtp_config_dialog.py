@@ -6,11 +6,11 @@ from PySide6.QtCore import Qt
 from qfluentwidgets import (PrimaryPushButton, PushButton, BodyLabel, TitleLabel,
                             InfoBar, InfoBarPosition, CardWidget, SimpleCardWidget, ComboBox)
 
-from core.email_sender import ThunderbirdSender
+from core.email_sender import SMTPSender
 
 
 class SMTPConfigDialog(QDialog):
-    """Dialog for configuring SMTP settings for Thunderbird/SMTP email client"""
+    """Dialog for configuring SMTP settings for pure SMTP email client"""
 
     def __init__(self, parent=None, smtp_config=None):
         super().__init__(parent)
@@ -88,23 +88,6 @@ class SMTPConfigDialog(QDialog):
         self.tls_checkbox.setChecked(True)
         form_layout.addRow("", self.tls_checkbox)
 
-        # Thunderbird profile path with browse button
-        profile_layout = QHBoxLayout()
-        self.thunderbird_profile_edit = QLineEdit()
-        self.thunderbird_profile_edit.setPlaceholderText("e.g., C:\\Users\\User\\AppData\\Roaming\\Thunderbird\\Profiles\\xxxx.default")
-        profile_layout.addWidget(self.thunderbird_profile_edit)
-
-        self.browse_profile_btn = PushButton("Browse...")
-        self.browse_profile_btn.clicked.connect(self.browse_thunderbird_profile)
-        profile_layout.addWidget(self.browse_profile_btn)
-
-        form_layout.addRow("Thunderbird Profile Path:", profile_layout)
-
-        # Save to Thunderbird checkbox
-        self.save_to_thunderbird_checkbox = QCheckBox("Save emails to Thunderbird Sent folder")
-        self.save_to_thunderbird_checkbox.setChecked(True)
-        form_layout.addRow("", self.save_to_thunderbird_checkbox)
-
         config_layout.addLayout(form_layout)
 
         # Test connection button
@@ -125,12 +108,11 @@ class SMTPConfigDialog(QDialog):
         help_text = BodyLabel(
             "For Gmail: Use smtp.gmail.com with port 587, enable TLS, and use an App Password.\n"
             "For Outlook.com: Use smtp-mail.outlook.com with port 587 and TLS.\n"
-            "For Yahoo: Use smtp.mail.yahoo.com with port 587 and TLS.\n\n"
-            "⚠️ IMPORTANT: For Thunderbird email history to work, you MUST specify the Thunderbird Profile Path.\n"
-            "• Click 'Browse...' to select your Thunderbird profile folder\n"
-            "• The profile folder usually ends with '.default' and contains the Mail folder\n"
-            "• If you don't set this, emails will be sent but won't appear in Thunderbird Sent folder\n"
-            "• Auto-detection may not work reliably - manual selection is recommended"
+            "For Yahoo: Use smtp.mail.yahoo.com with port 587 and TLS.\n"
+            "For MailerSend: Use smtp.mailersend.net with port 587 and TLS.\n\n"
+            "⚠️ IMPORTANT: Enter only the server name (e.g., smtp.gmail.com) without 'http://' or 'https://' prefix.\n\n"
+            "This is a pure SMTP client that sends emails directly without any email client integration.\n"
+            "Emails will be sent but won't appear in any email client's Sent folder."
         )
         help_text.setWordWrap(True)
         help_layout.addWidget(help_text)
@@ -145,6 +127,33 @@ class SMTPConfigDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_btn)
 
+        # Track original config for change detection
+        self.original_config = self.get_config()
+
+    def has_unsaved_changes(self):
+        """Check if there are unsaved changes"""
+        current_config = self.get_config()
+        return current_config != self.original_config
+
+    def reject(self):
+        """Handle cancel button - check for unsaved changes"""
+        if self.has_unsaved_changes():
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "You have unsaved changes. Do you want to save them before closing?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save
+            )
+
+            if reply == QMessageBox.StandardButton.Save:
+                self.accept()
+                return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                return
+
+        super().reject()
+
         self.save_btn = PrimaryPushButton("Save")
         self.save_btn.clicked.connect(self.accept)
         buttons_layout.addWidget(self.save_btn)
@@ -153,7 +162,12 @@ class SMTPConfigDialog(QDialog):
 
     def load_config(self):
         """Load SMTP configuration into the dialog"""
-        self.server_edit.setText(self.smtp_config.get('smtp_server', ''))
+        # Clean server name when loading (in case it was saved with protocol prefix)
+        server = self.smtp_config.get('smtp_server', '')
+        if server.startswith(('http://', 'https://')):
+            server = server.split('://', 1)[1]
+        server = server.rstrip('/')
+        self.server_edit.setText(server)
 
         # Set port based on configuration
         port = int(self.smtp_config.get('smtp_port', 587))
@@ -171,32 +185,7 @@ class SMTPConfigDialog(QDialog):
         self.username_edit.setText(self.smtp_config.get('smtp_username', ''))
         self.password_edit.setText(self.smtp_config.get('smtp_password', ''))
         self.tls_checkbox.setChecked(self.smtp_config.get('smtp_use_tls', True))
-        self.thunderbird_profile_edit.setText(self.smtp_config.get('thunderbird_profile', ''))
-        self.save_to_thunderbird_checkbox.setChecked(self.smtp_config.get('save_to_thunderbird', True))
 
-    def browse_thunderbird_profile(self):
-        """Browse for Thunderbird profile directory"""
-        current_path = self.thunderbird_profile_edit.text()
-        if not current_path:
-            # Default to common Thunderbird profile locations
-            import os
-            import platform
-            if platform.system() == "Windows":
-                current_path = os.path.expanduser(r"~\AppData\Roaming\Thunderbird\Profiles")
-            elif platform.system() == "Darwin":  # macOS
-                current_path = os.path.expanduser("~/Library/Thunderbird/Profiles")
-            else:  # Linux
-                current_path = os.path.expanduser("~/.thunderbird")
-
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Thunderbird Profile Directory",
-            current_path,
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
-        )
-
-        if directory:
-            self.thunderbird_profile_edit.setText(directory)
 
     def get_config(self):
         """Get SMTP configuration from the dialog"""
@@ -210,14 +199,32 @@ class SMTPConfigDialog(QDialog):
         else:  # Custom
             port = self.custom_port_spin.value()
 
+        # Clean server name - remove protocol prefixes if present
+        server = self.server_edit.text().strip()
+        original_server = server
+        # Remove http:// or https:// prefix if accidentally included
+        if server.startswith(('http://', 'https://')):
+            server = server.split('://', 1)[1]
+            # Show info message if protocol was removed
+            if original_server != server:
+                InfoBar.info(
+                    title="Server Name Cleaned",
+                    content=f"Removed protocol prefix. Using: {server}",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+        # Remove trailing slash if present
+        server = server.rstrip('/')
+
         return {
-            'smtp_server': self.server_edit.text().strip(),
+            'smtp_server': server,
             'smtp_port': port,
             'smtp_username': self.username_edit.text().strip(),
             'smtp_password': self.password_edit.text(),
-            'smtp_use_tls': self.tls_checkbox.isChecked(),
-            'thunderbird_profile': self.thunderbird_profile_edit.text().strip(),
-            'save_to_thunderbird': self.save_to_thunderbird_checkbox.isChecked()
+            'smtp_use_tls': self.tls_checkbox.isChecked()
         }
 
     def on_port_changed(self):
@@ -239,6 +246,9 @@ class SMTPConfigDialog(QDialog):
         """Test SMTP connection with current settings"""
         config = self.get_config()
 
+        # Debug logging to see what values are being used
+        print(f"DEBUG: Test connection config: {config}")
+
         # Validate required fields
         if not config['smtp_server']:
             QMessageBox.warning(self, "Validation Error", "SMTP Server is required")
@@ -256,14 +266,12 @@ class SMTPConfigDialog(QDialog):
 
         try:
             # Create test sender
-            self.test_sender = ThunderbirdSender(
+            self.test_sender = SMTPSender(
                 smtp_server=config['smtp_server'],
                 smtp_port=config['smtp_port'],
                 username=config['smtp_username'],
                 password=config['smtp_password'],
-                use_tls=config['smtp_use_tls'],
-                thunderbird_profile=config.get('thunderbird_profile'),
-                save_to_thunderbird=config.get('save_to_thunderbird', True)
+                use_tls=config['smtp_use_tls']
             )
 
             # Test connection
@@ -278,11 +286,22 @@ class SMTPConfigDialog(QDialog):
                     parent=self
                 )
                 QMessageBox.information(self, "Success", "SMTP connection test successful!")
+
+                # Auto-save settings after successful test
+                try:
+                    # Emit signal to parent window to save the config
+                    if hasattr(self.parent(), 'save_smtp_config_from_dialog'):
+                        self.parent().save_smtp_config_from_dialog(config)
+                except Exception as e:
+                    print(f"DEBUG: Auto-save failed: {str(e)}")
+
             else:
                 QMessageBox.warning(self, "Connection Failed", "SMTP connection test failed. Please check your settings.")
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Connection test failed: {str(e)}")
+            error_msg = f"Connection test failed: {str(e)}"
+            print(f"DEBUG: {error_msg}")
+            QMessageBox.critical(self, "Error", error_msg)
 
         finally:
             # Re-enable test button
@@ -292,6 +311,9 @@ class SMTPConfigDialog(QDialog):
     def accept(self):
         """Validate and accept the dialog"""
         config = self.get_config()
+
+        # Debug logging
+        print(f"DEBUG: Accept config: {config}")
 
         # Validate required fields
         if not config['smtp_server']:
@@ -304,31 +326,6 @@ class SMTPConfigDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", "Password is required")
             return
 
-        # Validate Thunderbird profile path if saving to Thunderbird is enabled
-        if config.get('save_to_thunderbird', True) and not config.get('thunderbird_profile'):
-            reply = QMessageBox.question(
-                self,
-                "Thunderbird Profile Required",
-                "You have enabled 'Save emails to Thunderbird Sent folder' but haven't specified a Thunderbird profile path.\n\n"
-                "Without the profile path, emails will be sent but won't appear in Thunderbird's Sent folder.\n\n"
-                "Do you want to:\n"
-                "• Yes: Continue with profile path selection\n"
-                "• No: Disable Thunderbird history saving\n"
-                "• Cancel: Go back to configuration",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Yes
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                # User wants to select profile path
-                self.browse_thunderbird_profile()
-                return  # Don't accept yet, let user try again
-            elif reply == QMessageBox.StandardButton.No:
-                # User wants to disable Thunderbird saving
-                self.save_to_thunderbird_checkbox.setChecked(False)
-                config['save_to_thunderbird'] = False
-            else:
-                # User cancelled
-                return
-
+        # Update original config for change detection
+        self.original_config = self.get_config()
         super().accept()

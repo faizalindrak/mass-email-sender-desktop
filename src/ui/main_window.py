@@ -2162,7 +2162,7 @@ class MainWindow(FluentWindow):
     def on_email_client_changed(self):
         """Handle email client combo box change"""
         client = self.email_client_combo.currentText()
-        # Show SMTP button only for smtp client (thunderbird uses SMTP but doesn't need separate config)
+        # Show SMTP button only for smtp client (thunderbird uses WebExtension, not SMTP)
         self.smtp_config_btn.setVisible(client == 'smtp')
 
     def open_smtp_config_dialog(self):
@@ -2171,7 +2171,8 @@ class MainWindow(FluentWindow):
             # Get current profile config to load existing SMTP settings
             profile_config = self.config_manager.get_profile_config()
 
-            # Extract SMTP settings from profile config
+            # Extract SMTP settings from profile config with proper defaults
+            # Handle case where SMTP settings don't exist yet (new profile or never configured)
             smtp_config = {
                 'smtp_server': profile_config.get('smtp_server', ''),
                 'smtp_port': profile_config.get('smtp_port', 587),
@@ -2212,3 +2213,21 @@ class MainWindow(FluentWindow):
         except Exception as e:
             self.logger.error(f"Failed to open SMTP configuration dialog: {str(e)}")
             QMessageBox.critical(self, "Error", f"Failed to open SMTP configuration: {str(e)}")
+
+    def save_smtp_config_from_dialog(self, smtp_config):
+        """Save SMTP config from dialog (called when test connection succeeds)"""
+        try:
+            # Get current profile config
+            profile_config = self.config_manager.get_profile_config()
+
+            # Update profile config with new SMTP settings
+            profile_config.update(smtp_config)
+            self.config_manager.save_profile_config(
+                self.config_manager.get_current_profile(),
+                profile_config
+            )
+
+            self.logger.info(f"Auto-saved SMTP config: {smtp_config}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to auto-save SMTP config: {str(e)}")
