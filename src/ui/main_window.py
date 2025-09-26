@@ -10,14 +10,14 @@ from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QAction, QIcon, QFont
 
 from qfluentwidgets import (FluentIcon, setTheme, Theme, FluentWindow, NavigationItemPosition,
-                            qrouter, SubtitleLabel, setFont, BodyLabel, PushButton, TitleLabel,
-                            PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox,
-                            CardWidget, SimpleCardWidget, HeaderCardWidget, GroupHeaderCardWidget,
-                            SwitchButton, ToggleButton, Pivot, PivotItem, ScrollArea,
-                            InfoBar, InfoBarPosition, StrongBodyLabel, CaptionLabel,
-                            TableWidget, ListWidget, TreeWidget, ProgressBar,
-                            ToolTip, TeachingTip, TeachingTipTailPosition, PopupTeachingTip,
-                            FlyoutViewBase, Flyout, FlyoutAnimationType)
+                             qrouter, SubtitleLabel, setFont, BodyLabel, PushButton, TitleLabel,
+                             PrimaryPushButton, ComboBox, LineEdit, TextEdit, CheckBox,
+                             CardWidget, SimpleCardWidget, HeaderCardWidget, GroupHeaderCardWidget,
+                             SwitchButton, ToggleButton, Pivot, PivotItem, ScrollArea,
+                             InfoBar, InfoBarPosition, StrongBodyLabel, CaptionLabel,
+                             TableWidget, ListWidget, TreeWidget, ProgressBar,
+                             ToolTip, TeachingTip, TeachingTipTailPosition, PopupTeachingTip,
+                             FlyoutViewBase, Flyout, FlyoutAnimationType, ExpandGroupSettingCard)
 from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QScrollArea, QWidget, QHBoxLayout
 
 from core.database_manager import DatabaseManager  # Changed relative import
@@ -280,6 +280,10 @@ class MainWindow(FluentWindow):
         self.is_monitoring = False
         self.files_processed_count = 0
 
+        # Browse dialog flags to prevent re-entrance
+        self.browse_database_in_progress = False
+        self.browse_template_in_progress = False
+
         # Initialize UI
         self.init_ui()
         self.init_connections()
@@ -376,44 +380,65 @@ class MainWindow(FluentWindow):
         profile_card.viewLayout.addLayout(profile_layout)
         layout.addWidget(profile_card)
 
-        # System Paths Card
-        paths_card = GroupHeaderCardWidget("System Paths")
-        paths_layout = QVBoxLayout()
-        paths_layout.setSpacing(8)
-        paths_layout.setContentsMargins(12, 12, 12, 12)
+        # Create accordion for system paths
+        self.system_paths_accordion = ExpandGroupSettingCard(FluentIcon.FOLDER, "System Paths")
 
-        # Database file row
-        db_grid = QGridLayout()
-        db_grid.setSpacing(8)
-        db_label = StrongBodyLabel("Database File:")
-        self.database_path_edit = LineEdit()
-        self.database_path_edit.setPlaceholderText("Select database file...")
-        self.database_path_edit.setMinimumWidth(300)
+        # Database path section
+        db_widget = QWidget()
+        db_widget.setMinimumHeight(60)  # Increase minimum height for vertical layout
+        db_layout = QVBoxLayout(db_widget)
+        db_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        db_layout.setSpacing(0)  # No spacing between title and path
+
+        # Top row: title and browse button
+        db_top_layout = QHBoxLayout()
+        db_title = StrongBodyLabel("Database Path")
         self.browse_database_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_database_btn.setFixedWidth(100)
-        db_grid.addWidget(db_label, 0, 0)
-        db_grid.addWidget(self.database_path_edit, 0, 1)
-        db_grid.addWidget(self.browse_database_btn, 0, 2)
-        db_grid.setColumnStretch(1, 1)
-        paths_layout.addLayout(db_grid)
+        self.browse_database_btn.setEnabled(True)
+        self.browse_database_btn.clicked.connect(self.browse_database_file)
+        db_top_layout.addWidget(db_title)
+        db_top_layout.addStretch()
+        db_top_layout.addWidget(self.browse_database_btn)
 
-        # Template folder row
-        tpl_grid = QGridLayout()
-        tpl_grid.setSpacing(8)
-        tpl_label = StrongBodyLabel("Template Folder:")
-        self.template_dir_edit = LineEdit()
-        self.template_dir_edit.setPlaceholderText("Select template folder...")
-        self.template_dir_edit.setMinimumWidth(300)
+        # Bottom row: path label
+        self.db_path_label = CaptionLabel("Not selected")
+        self.db_path_label.setWordWrap(True)
+
+        db_layout.addLayout(db_top_layout)
+        db_layout.addWidget(self.db_path_label)
+        self.system_paths_accordion.addGroupWidget(db_widget)
+
+        # Template folder section
+        tpl_widget = QWidget()
+        tpl_widget.setMinimumHeight(60)  # Increase minimum height for vertical layout
+        tpl_layout = QVBoxLayout(tpl_widget)
+        tpl_layout.setContentsMargins(32, 8, 16, 8)  # Align with accordion title text
+        tpl_layout.setSpacing(0)  # No spacing between title and path
+
+        # Top row: title and browse button
+        tpl_top_layout = QHBoxLayout()
+        tpl_title = StrongBodyLabel("Template Folder")
         self.browse_template_btn = PushButton(FluentIcon.FOLDER, "Browse")
         self.browse_template_btn.setFixedWidth(100)
-        tpl_grid.addWidget(tpl_label, 0, 0)
-        tpl_grid.addWidget(self.template_dir_edit, 0, 1)
-        tpl_grid.addWidget(self.browse_template_btn, 0, 2)
-        tpl_grid.setColumnStretch(1, 1)
-        paths_layout.addLayout(tpl_grid)
+        self.browse_template_btn.setEnabled(True)
+        self.browse_template_btn.clicked.connect(self.browse_template_folder)
+        tpl_top_layout.addWidget(tpl_title)
+        tpl_top_layout.addStretch()
+        tpl_top_layout.addWidget(self.browse_template_btn)
 
-        paths_card.viewLayout.addLayout(paths_layout)
-        layout.addWidget(paths_card)
+        # Bottom row: path label
+        self.tpl_path_label = CaptionLabel("Not selected")
+        self.tpl_path_label.setWordWrap(True)
+
+        tpl_layout.addLayout(tpl_top_layout)
+        tpl_layout.addWidget(self.tpl_path_label)
+        self.system_paths_accordion.addGroupWidget(tpl_widget)
+
+        layout.addWidget(self.system_paths_accordion)
+
+        # Fix accordion issue by reconnecting signals after accordion is created
+        QTimer.singleShot(100, self.reconnect_browse_signals)
 
         # Monitoring Settings Card
         monitoring_card = GroupHeaderCardWidget("Monitoring Settings")
@@ -1164,8 +1189,9 @@ class MainWindow(FluentWindow):
         self.toggle_monitoring_btn.clicked.connect(self.toggle_monitoring)
         self.browse_monitor_btn.clicked.connect(self.browse_monitor_folder)
         self.browse_sent_btn.clicked.connect(self.browse_sent_folder)
-        self.browse_database_btn.clicked.connect(self.browse_database_file)
-        self.browse_template_btn.clicked.connect(self.browse_template_folder)
+        # Temporarily disconnect browse buttons to test if accordion is causing the issue
+        # self.browse_database_btn.clicked.connect(self.browse_database_file)
+        # self.browse_template_btn.clicked.connect(self.browse_template_folder)
         self.save_template_btn.clicked.connect(self.save_template_file)
         self.preview_btn.clicked.connect(self.generate_preview)
         self.load_profile_btn.clicked.connect(self.load_profile_from_file)
@@ -1222,9 +1248,10 @@ class MainWindow(FluentWindow):
 
             # Database path (from global config if not in profile)
             db_path = config.get('database_path', self.config_manager.get_database_path())
-            self.database_path_edit.setText(db_path)
+            self.db_path_label.setText(db_path)
             # Template dir (from global config)
-            self.template_dir_edit.setText(self.config_manager.get_template_dir())
+            template_dir = self.config_manager.get_template_dir()
+            self.tpl_path_label.setText(template_dir)
             
             # Other folders and pattern
             self.monitor_folder_edit.setText(config.get('monitor_folder', ''))
@@ -1287,7 +1314,7 @@ class MainWindow(FluentWindow):
             # Load body from selected template file (do not persist content in configuration)
             try:
                 if selected_template:
-                    template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+                    template_dir = self.config_manager.get_template_dir()
                     template_path = os.path.join(template_dir, selected_template)
                     if os.path.exists(template_path):
                         with open(template_path, 'r', encoding='utf-8') as f:
@@ -1393,60 +1420,70 @@ class MainWindow(FluentWindow):
 
     def browse_database_file(self):
         """Browse for database file"""
-        initial_dir = os.path.dirname(self.database_path_edit.text().strip() or os.path.abspath("database"))
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Database File",
-            initial_dir,
-            "SQLite Database (*.db);;All files (*.*)"
-        )
-        if file_path:
-            self.database_path_edit.setText(file_path)
-            # Reinitialize database manager with new path and update worker
-            try:
-                self.database_manager = DatabaseManager(file_path)
-                self.worker.database_manager = self.database_manager
-                self.refresh_logs_table()
-                # Persist database path into global JSON config
-                self.config_manager.set_database_path(file_path)
-                InfoBar.success(
-                    title="Database Updated",
-                    content=f"Database set to: {file_path}",
-                    orient=Qt.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP,
-                    duration=3000,
-                    parent=self
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
+        if self.browse_database_in_progress:
+            return  # Prevent re-entrance
+
+        self.browse_database_in_progress = True
+        try:
+            initial_dir = os.path.dirname(self.db_path_label.text().strip() or os.path.abspath("database"))
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Database File",
+                initial_dir,
+                "SQLite Database (*.db);;All files (*.*)"
+            )
+            if file_path:
+                self.db_path_label.setText(file_path)
+                # Reinitialize database manager with new path and update worker
+                try:
+                    self.database_manager = DatabaseManager(file_path)
+                    self.worker.database_manager = self.database_manager
+                    # Persist database path into global JSON config
+                    self.config_manager.set_database_path(file_path)
+                    InfoBar.success(
+                        title="Database Updated",
+                        content=f"Database set to: {file_path}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
+        finally:
+            self.browse_database_in_progress = False
 
     def browse_template_folder(self):
         """Browse for template folder"""
-        initial_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
-        folder = QFileDialog.getExistingDirectory(self, "Select Template Folder", initial_dir)
-        if folder:
-            self.template_dir_edit.setText(folder)
-            try:
-                # Persist to global JSON config
-                self.config_manager.set_template_dir(folder)
-                # Reinitialize template engine with new directory
-                self.template_engine = EmailTemplateEngine(folder)
-                self.worker.template_engine = self.template_engine
-                # Reload templates and content
-                self.load_templates()
-                self.load_selected_template()
-                InfoBar.success(
-                    title="Template Updated",
-                    content=f"Template folder set to: {folder}",
-                    orient=Qt.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP,
-                    duration=3000,
-                    parent=self
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to set template folder: {str(e)}")
+        if self.browse_template_in_progress:
+            return  # Prevent re-entrance
+
+        self.browse_template_in_progress = True
+        try:
+            initial_dir = self.tpl_path_label.text().strip() or self.config_manager.get_template_dir()
+            folder = QFileDialog.getExistingDirectory(self, "Select Template Folder", initial_dir)
+            if folder:
+                self.tpl_path_label.setText(f"Template Folder: {folder}")
+                try:
+                    # Persist to global JSON config
+                    self.config_manager.set_template_dir(folder)
+                    # Reinitialize template engine with new directory
+                    self.template_engine = EmailTemplateEngine(folder)
+                    self.worker.template_engine = self.template_engine
+                    InfoBar.success(
+                        title="Template Updated",
+                        content=f"Template folder set to: {folder}",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to set template folder: {str(e)}")
+        finally:
+            self.browse_template_in_progress = False
 
     def save_template_file(self):
         """Save current body editor content to the selected template file in the chosen folder"""
@@ -1455,7 +1492,7 @@ class MainWindow(FluentWindow):
             QMessageBox.warning(self, "Warning", "Please select a template to save")
             return
 
-        template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+        template_dir = self.config_manager.get_template_dir()
         template_path = os.path.join(template_dir, template_name)
 
         try:
@@ -1627,13 +1664,13 @@ class MainWindow(FluentWindow):
                     config_data[key] = value
 
             # Persist global database path and current profile
-            db_path_text = self.database_path_edit.text().strip()
+            db_path_text = self.db_path_label.text().strip()
             if db_path_text:
                 self.config_manager.set_database_path(db_path_text)
             # Persist template directory path to global config
-            tpl_dir_text = self.template_dir_edit.text().strip()
-            if tpl_dir_text:
-                self.config_manager.set_template_dir(tpl_dir_text)
+            template_dir = self.tpl_path_label.text().strip()
+            if template_dir:
+                self.config_manager.set_template_dir(template_dir)
             self.config_manager.set_current_profile(profile_name)
 
             self.config_manager.save_profile_config(profile_name, config_data)
@@ -1880,7 +1917,7 @@ class MainWindow(FluentWindow):
         """Load available templates into combo box"""
         try:
             # Prefer the path from UI if present, otherwise fallback to config
-            template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+            template_dir = self.config_manager.get_template_dir()
             if not os.path.exists(template_dir):
                 os.makedirs(template_dir, exist_ok=True)
             
@@ -1901,7 +1938,7 @@ class MainWindow(FluentWindow):
             return
 
         try:
-            template_dir = self.template_dir_edit.text().strip() or self.config_manager.get_template_dir()
+            template_dir = self.config_manager.get_template_dir()
             template_path = os.path.join(template_dir, template_name)
 
             if os.path.exists(template_path):
@@ -2231,3 +2268,16 @@ class MainWindow(FluentWindow):
 
         except Exception as e:
             self.logger.error(f"Failed to auto-save SMTP config: {str(e)}")
+
+    def reconnect_browse_signals(self):
+        """Reconnect browse signals after accordion is created to prevent accordion from triggering them"""
+        try:
+            # Disconnect existing signals
+            self.browse_database_btn.clicked.disconnect()
+            self.browse_template_btn.clicked.disconnect()
+
+            # Reconnect signals
+            self.browse_database_btn.clicked.connect(self.browse_database_file)
+            self.browse_template_btn.clicked.connect(self.browse_template_folder)
+        except Exception as e:
+            self.logger.warning(f"Error reconnecting browse signals: {str(e)}")
