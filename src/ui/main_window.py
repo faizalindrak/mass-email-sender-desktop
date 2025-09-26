@@ -332,7 +332,7 @@ class WrappingExtensionsWidget(QWidget):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setMaximumHeight(120)  # Limit height
+        self.scroll_area.setMaximumHeight(200)  # Match parent widget height
 
         # Container widget for the grid layout
         self.container = QWidget()
@@ -1769,20 +1769,80 @@ class MainWindow(FluentWindow):
         """Scan the monitoring folder and populate available file extensions"""
         try:
             monitor_folder = self.monitor_folder_edit.text().strip()
+            self.logger.info(f"Scanning extensions in folder: {monitor_folder}")
+
+            if not monitor_folder:
+                InfoBar.warning(
+                    title="No Monitor Folder",
+                    content="Please set a monitor folder first",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+                return
+
+            if not os.path.exists(monitor_folder):
+                InfoBar.warning(
+                    title="Folder Not Found",
+                    content=f"Monitor folder does not exist: {monitor_folder}",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+                return
+
             extensions = set()
-            if monitor_folder and os.path.exists(monitor_folder):
-                for filename in os.listdir(monitor_folder):
-                    file_path = os.path.join(monitor_folder, filename)
-                    if os.path.isfile(file_path):
-                        ext = os.path.splitext(filename)[1].lower()
-                        if ext:
-                            extensions.add(ext)
+            file_count = 0
+            for filename in os.listdir(monitor_folder):
+                file_path = os.path.join(monitor_folder, filename)
+                if os.path.isfile(file_path):
+                    file_count += 1
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext:
+                        extensions.add(ext)
+
+            self.logger.info(f"Found {file_count} files with {len(extensions)} unique extensions")
+
             # Fallback defaults if no extensions found
             if not extensions:
                 extensions = {'.pdf', '.xlsx', '.docx', '.txt'}
+                InfoBar.info(
+                    title="No Extensions Found",
+                    content=f"No file extensions found in folder. Using defaults: {', '.join(extensions)}",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+
             self.update_extensions_list(sorted(extensions), preselected or [])
+
+            InfoBar.success(
+                title="Scan Complete",
+                content=f"Found {len(extensions)} file types from {file_count} files",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=3000,
+                parent=self
+            )
+
         except Exception as e:
             self.logger.error(f"Failed to scan extensions: {str(e)}")
+            InfoBar.error(
+                title="Scan Failed",
+                content=f"Error scanning folder: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
 
     def update_extensions_list(self, extensions, selected):
         """Update the extensions list with checkable items and preselected values"""
